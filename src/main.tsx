@@ -7,6 +7,22 @@ import GateScreen from "./components/GateScreen";
 import "leaflet/dist/leaflet.css";
 import "./index.css";
 
+// ── SW killer ────────────────────────────────────────────────────────────────
+// Unregister ALL service workers left over from the old Supabase build, wipe
+// every cache entry, then register our self-nuking sw.js so returning visitors
+// whose browser still has the old SW cached get force-refreshed on next load.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.getRegistrations().then((registrations) => {
+    registrations.forEach((reg) => reg.unregister());
+  });
+  caches.keys().then((keys) => {
+    keys.forEach((key) => caches.delete(key));
+  });
+  // Register the self-nuking SW so it activates and clears any residual cache
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function Root() {
   // GateScreen now uses the SDK internally to look up activation codes.
   // It calls onGranted() only after a valid code is confirmed, and we persist
