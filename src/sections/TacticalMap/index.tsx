@@ -181,6 +181,7 @@ export default function TacticalMap() {
   const [sstOffset, setSstOffset] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
   const animFrameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isAnimatingRef = useRef(false);
   const [showWaypoints, setShowWaypoints] = useState(false);
 
   const { data: waypointsData } = useQuery("Waypoint", {
@@ -417,15 +418,14 @@ export default function TacticalMap() {
   }, [sstOffset, showSST]);
 
   useEffect(() => {
+    isAnimatingRef.current = isAnimating;
     if (!isAnimating) {
       if (animFrameRef.current) clearTimeout(animFrameRef.current);
       return;
     }
     const step = () => {
-      setSstOffset((prev) => {
-        const next = (prev + 1) % SST_HISTORY_OFFSETS.length;
-        return next;
-      });
+      if (!isAnimatingRef.current) return;
+      setSstOffset((prev) => (prev + 1) % SST_HISTORY_OFFSETS.length);
       animFrameRef.current = setTimeout(step, 1200);
     };
     animFrameRef.current = setTimeout(step, 1200);
