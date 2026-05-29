@@ -1,0 +1,24 @@
+# Netlify build & deploy configuration
+# Netlify will auto-run this on every push to your connected GitHub branch.
+
+[build]
+  command   = "npm run build"
+  publish   = "dist"
+
+# Netlify Functions — must be declared before the SPA catch-all
+[functions]
+  directory = "netlify/functions"
+
+# SST proxy: pass through to the function (no rewrite needed, Netlify handles it automatically)
+# Explicitly exclude /.netlify/* from the SPA redirect
+[[redirects]]
+  from   = "/.netlify/*"
+  to     = "/.netlify/:splat"
+  status = 200
+  force  = true
+
+# SPA redirect — all routes return index.html so React Router works
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200

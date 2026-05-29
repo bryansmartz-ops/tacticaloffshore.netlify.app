@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #0ea5e9;
+  --color-bg: #0f172a;
+  --color-surface: #1e293b;
+  --color-text: #f1f5f9;
+}
+
+html {
+  /* Prevent iOS font-size bump in landscape */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  @apply bg-slate-900 text-slate-100 font-sans antialiased;
+  -webkit-tap-highlight-color: transparent;
+  /* Respect iOS safe areas globally */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Leaflet dark theme overrides */
+.leaflet-container {
+  background: #0f172a;
+}
+
+.leaflet-popup-content-wrapper {
+  @apply bg-slate-800 text-slate-100 rounded-lg shadow-xl;
+}
+
+.leaflet-popup-tip {
+  @apply bg-slate-800;
+}
+
+.fishing-map-popup .leaflet-popup-content-wrapper {
+  @apply bg-slate-900/95 border border-cyan-500/30;
+}
+
+.fishing-map-popup .leaflet-popup-content {
+  @apply text-sm leading-relaxed;
+}
+
+/* Minimum touch target size — avoids tiny tap areas on mobile */
+button,
+a,
+[role="button"] {
+  min-height: 36px;
+  min-width: 36px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-800;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-600 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-500;
+}
