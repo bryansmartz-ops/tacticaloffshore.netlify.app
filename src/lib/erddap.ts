@@ -53,8 +53,10 @@ export function gibsSSTTileUrl(offsetDays = 0): string {
 }
 
 export function gibsSSTLabel(offsetDays: number): string {
-  if (offsetDays === 0) return "Now";
-  return `${offsetDays * 12}h ago`;
+  if (offsetDays === 0) return "Today";
+  if (offsetDays === 1) return "-1 Day";
+  if (offsetDays === 2) return "-2 Day";
+  return `-${offsetDays} Day`;
 }
 
 type ProxyResponse =

@@ -180,8 +180,7 @@ export default function TacticalMap() {
   const [showHotspots, setShowHotspots] = useState(true);
   const [sstOffset, setSstOffset] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
-  const animFrameRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isAnimatingRef = useRef(false);
+  const animIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showWaypoints, setShowWaypoints] = useState(false);
 
   const { data: waypointsData } = useQuery("Waypoint", {
@@ -388,7 +387,7 @@ export default function TacticalMap() {
     mapRef.current = map;
 
     return () => {
-      if (animFrameRef.current) clearTimeout(animFrameRef.current);
+      if (animIntervalRef.current) clearInterval(animIntervalRef.current);
       map.remove();
       mapRef.current = null;
       sstLayersRef.current = [null, null, null, null];
@@ -417,20 +416,26 @@ export default function TacticalMap() {
     });
   }, [sstOffset, showSST]);
 
+  // Start/stop the animation loop using setInterval held in a ref.
+  // This is intentionally NOT cleaned up by React — the interval lives as long as
+  // isAnimating is true, and is only cleared when the user stops or unmounts.
   useEffect(() => {
-    isAnimatingRef.current = isAnimating;
-    if (!isAnimating) {
-      if (animFrameRef.current) clearTimeout(animFrameRef.current);
-      return;
+    if (isAnimating) {
+      if (animIntervalRef.current) clearInterval(animIntervalRef.current);
+      animIntervalRef.current = setInterval(() => {
+        setSstOffset((prev) => (prev + 1) % SST_HISTORY_OFFSETS.length);
+      }, 1200);
+    } else {
+      if (animIntervalRef.current) {
+        clearInterval(animIntervalRef.current);
+        animIntervalRef.current = null;
+      }
     }
-    const step = () => {
-      if (!isAnimatingRef.current) return;
-      setSstOffset((prev) => (prev + 1) % SST_HISTORY_OFFSETS.length);
-      animFrameRef.current = setTimeout(step, 1200);
-    };
-    animFrameRef.current = setTimeout(step, 1200);
     return () => {
-      if (animFrameRef.current) clearTimeout(animFrameRef.current);
+      if (animIntervalRef.current) {
+        clearInterval(animIntervalRef.current);
+        animIntervalRef.current = null;
+      }
     };
   }, [isAnimating]);
 
