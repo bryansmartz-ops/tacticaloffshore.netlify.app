@@ -75,11 +75,16 @@ async function callProxy(
   signal: AbortSignal,
 ): Promise<ProxyResponse> {
   const qs = new URLSearchParams(params).toString();
-  const resp = await fetch(`${PROXY_BASE}?${qs}`, { signal });
-  if (!resp.ok) {
-    throw new Error(`Proxy HTTP ${resp.status}`);
+  const url = `${PROXY_BASE}?${qs}`;
+  try {
+    const resp = await fetch(url, { signal });
+    if (!resp.ok) {
+      throw new Error(`Proxy HTTP ${resp.status}`);
+    }
+    return (await resp.json()) as ProxyResponse;
+  } catch (err) {
+    throw err;
   }
-  return (await resp.json()) as ProxyResponse;
 }
 
 export async function fetchSSTBBox(bbox: BBoxQuery): Promise<SSTResult> {

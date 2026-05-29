@@ -36,22 +36,24 @@ interface DatasetDef {
 
 const DATASETS: DatasetDef[] = [
   {
-    id: "noaacwLEOACSPOSSTL3SnrtCDaily",
-    base: "https://cwcgom.aoml.noaa.gov/erddap/griddap/noaacwLEOACSPOSSTL3SnrtCDaily",
-    sstVar: "sst",
-    qualityVar: "quality_level",
-    minQuality: 4,
-    resolution: "0.02deg",
-    label: "cwcgom-acspo-l3s",
-  },
-  {
-    id: "jplMURSST41ANRT",
-    base: "https://coastwatch.noaa.gov/erddap/griddap/jplMURSST41ANRT",
+    // JPL MUR SST 0.01° — the original working dataset on the main CoastWatch server
+    id: "jplMURSST41",
+    base: "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41",
     sstVar: "analysed_sst",
     qualityVar: null,
     minQuality: 0,
     resolution: "0.01deg",
-    label: "cw-mur-nrt",
+    label: "pfeg-mur-sst",
+  },
+  {
+    // MUR NRT (near-real-time) variant on same server as fallback
+    id: "jplMURSST41ANRT",
+    base: "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41ANRT",
+    sstVar: "analysed_sst",
+    qualityVar: null,
+    minQuality: 0,
+    resolution: "0.01deg",
+    label: "pfeg-mur-nrt",
   },
 ];
 
