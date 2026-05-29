@@ -299,7 +299,7 @@ export default function TacticalMap() {
         interactive: false,
         icon: L.divIcon({
           className: "",
-          html: `<div style="background:rgba(255,255,255,0.88);color:#000000;border:1px solid rgba(0,0,0,0.25);border-radius:5px;padding:2px 7px;font-size:11px;font-weight:600;white-space:nowrap">${c.name}</div>`,
+          html: `<div style="color:#e2e8f0;font-size:11px;font-weight:700;white-space:nowrap;text-shadow:0 0 4px #000,0 0 8px #000,1px 1px 2px #000,-1px -1px 2px #000;letter-spacing:0.03em">${c.name}</div>`,
           iconAnchor: [40, 10],
         }),
       }).addTo(map);
