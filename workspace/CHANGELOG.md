@@ -18,6 +18,12 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-29 (Fix SST animation halt — root cause: unstable useMutation dep)
+- Real bug: `useMutation` returns fresh `createWaypoint` ref on every render → `useCallback([createWaypoint])` produced new `addWaypoint` identity → map `useEffect([addWaypoint])` re-ran cleanup (calling `clearInterval`) after each `setSstOffset` tick
+- Fix: replaced `addWaypoint` useCallback with `addWaypointRef` (ref updated via no-dep effect) — ref stays current without being a reactive dep
+- Map init effect now has `[]` deps — never reinitializes mid-session, interval never interrupted
+- `addWaypointRef.current()` called inside popup click handler instead of closed-over `addWaypoint`
+
 ## 2026-05-29 (SST Plan Step 4/4 — Smoke-test all three SST consumers — COMPLETE)
 - Hotspots: `getSSTBBoxCached(hotBBox/ambBBox)` → loading state, dataset badge, fallback to static on `!ok` ✅
 - Weather: `getSSTBBoxCached(BUOY_SST_BBOX)` on mount + refresh, dataset/resolution badge, reason on error ✅

@@ -199,25 +199,22 @@ export default function TacticalMap() {
     waypointsRef.current = waypoints;
   }, [waypoints]);
 
-  const addWaypoint = useCallback(
-    async (
+  // Keep addWaypoint in a ref so the map init effect never needs to re-run
+  // when useMutation returns a fresh createWaypoint reference on each render.
+  const addWaypointRef = useRef<
+    (
       name: string,
       lat: number,
       lng: number,
       tdW: string,
       tdX: string,
-    ) => {
-      await createWaypoint({
-        name,
-        lat,
-        lng,
-        tdW,
-        tdX,
-        savedAt: new Date(),
-      });
-    },
-    [createWaypoint],
-  );
+    ) => Promise<void>
+  >(async () => {});
+  useEffect(() => {
+    addWaypointRef.current = async (name, lat, lng, tdW, tdX) => {
+      await createWaypoint({ name, lat, lng, tdW, tdX, savedAt: new Date() });
+    };
+  });
 
   const deleteWaypoint = useCallback(
     async (id: string) => {
@@ -368,7 +365,7 @@ export default function TacticalMap() {
           const name =
             input?.value.trim() ||
             `Waypoint ${waypointsRef.current.length + 1}`;
-          await addWaypoint(name, lat, lng, td.w, td.x);
+          await addWaypointRef.current(name, lat, lng, td.w, td.x);
           popup.close();
         });
       };
@@ -394,7 +391,7 @@ export default function TacticalMap() {
       bathyBaseRef.current = null;
       bathyOverlayRef.current = null;
     };
-  }, [addWaypoint]);
+  }, []); // empty deps — map never reinitializes; addWaypointRef stays current via its own effect
 
   useEffect(() => {
     const map = mapRef.current;
