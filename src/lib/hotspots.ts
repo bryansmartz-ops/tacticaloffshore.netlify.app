@@ -467,7 +467,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 39.52,
     lng: -72.05,
     ambientLat: 39.52,
-    ambientLng: -71.3,
+    ambientLng: -72.8, // inshore shelf ~0.75° west — cooler shelf water for break reference
     bboxPad: 0.15,
     idealSstF: 70,
     // Strong NJ tuna grounds — consistent bigeye/YFT history; well-documented shelf break
@@ -481,7 +481,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 39.05,
     lng: -72.7,
     ambientLat: 39.05,
-    ambientLng: -71.95,
+    ambientLng: -73.45, // inshore shelf ~0.75° west — cooler shelf water for break reference
     bboxPad: 0.15,
     idealSstF: 72,
     // Primary OC, MD tuna grounds — YFT currently active per current reports; high-percentage
@@ -494,7 +494,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 39.38,
     lng: -72.25,
     ambientLat: 39.38,
-    ambientLng: -71.5,
+    ambientLng: -73.0, // inshore shelf ~0.75° west — cooler shelf water for break reference
     bboxPad: 0.15,
     idealSstF: 71,
     // NJ/DE border grounds — solid tuna and white marlin producers
@@ -508,7 +508,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 38.22,
     lng: -73.82,
     ambientLat: 38.22,
-    ambientLng: -73.1,
+    ambientLng: -74.55, // inshore shelf ~0.75° west — cooler shelf water for break reference
     bboxPad: 0.15,
     idealSstF: 74,
     // Top MD/VA tournament ground — reliably warm Gulf Stream finger; YFT/marlin
@@ -521,7 +521,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 38.52,
     lng: -73.42,
     ambientLat: 38.52,
-    ambientLng: -72.7,
+    ambientLng: -74.15, // inshore shelf ~0.75° west — cooler shelf water for break reference
     bboxPad: 0.15,
     idealSstF: 72,
     // Productive ledge; moderate historical data — consistent but not top-tier
@@ -534,7 +534,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 37.55,
     lng: -74.35,
     ambientLat: 37.55,
-    ambientLng: -73.6,
+    ambientLng: -75.1, // inshore shelf ~0.75° west — cooler shelf water for break reference
     bboxPad: 0.15,
     idealSstF: 73,
     // GS pushes warm water north into this canyon corridor — elevated when GS meanders north.
@@ -549,7 +549,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 37.05,
     lng: -74.65,
     ambientLat: 37.05,
-    ambientLng: -73.9,
+    ambientLng: -75.4, // inshore shelf ~0.75° west — cooler shelf water for break reference
     bboxPad: 0.15,
     idealSstF: 71,
     // When GS is near Norfolk (current scenario), warm water + SST break = prime YFT/mahi.
@@ -563,7 +563,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 35.15,
     lng: -75.2,
     ambientLat: 35.15,
-    ambientLng: -74.45,
+    ambientLng: -75.95, // inshore shelf ~0.75° west — cooler shelf water for break reference
     bboxPad: 0.15,
     idealSstF: 76,
     // Gulf Stream pinch point — strongest YFT/mahi/wahoo history in the range; early season
