@@ -12,50 +12,25 @@ import {
 } from "lucide-react";
 import L from "leaflet";
 import {
-  getSSTCached,
+  getSSTBBoxCached,
   gibsSSTDate,
   gibsSSTTileUrl,
   gibsSSTLabel,
 } from "../../lib/erddap";
+import type { BBoxQuery } from "../../lib/erddap";
+import {
+  haversineNm,
+  toLoranTD,
+  speciesFromSST,
+  computeConfidence,
+  confidenceColor,
+  hotspotBBox,
+  HOTSPOT_BBOX_PAD,
+  HOTSPOT_DEFS,
+} from "../../lib/hotspots";
+import type { HotspotDef } from "../../lib/hotspots";
 import { useQuery, useMutation } from "@animaapp/playground-react-sdk";
 import type { Waypoint } from "@animaapp/playground-react-sdk";
-
-const MASTER = { lat: 42.7137, lng: -76.8246 };
-const SEC_W = { lat: 46.8, lng: -67.9266 };
-const SEC_X = { lat: 41.253, lng: -69.9775 };
-
-const ED_W = 28691;
-const ED_X = 41657;
-const C_US_PER_NM = 6.177;
-
-function haversineNm(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-): number {
-  const R = 3440.065;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
-function toLoranTD(lat: number, lng: number) {
-  const dM = haversineNm(lat, lng, MASTER.lat, MASTER.lng);
-  const dW = haversineNm(lat, lng, SEC_W.lat, SEC_W.lng);
-  const dX = haversineNm(lat, lng, SEC_X.lat, SEC_X.lng);
-  const tdW = ED_W + (dM - dW) * C_US_PER_NM;
-  const tdX = ED_X + (dM - dX) * C_US_PER_NM;
-  return {
-    w: (tdW >= 0 ? "+" : "") + Math.round(tdW),
-    x: (tdX >= 0 ? "+" : "") + Math.round(tdX),
-  };
-}
 
 const CANYONS = [
   { name: "Hudson", lat: 39.52, lng: -72.05 },
@@ -69,7 +44,8 @@ const CANYONS = [
   { name: "Norfolk", lat: 37.05, lng: -74.65 },
 ];
 
-interface HotspotDef {
+// Derive display data from fallback SSTs at module load — replaced by live data
+interface HotspotDisplay {
   id: string;
   title: string;
   confidence: number;
@@ -80,64 +56,25 @@ interface HotspotDef {
   species: string[];
 }
 
-const HOTSPOTS: HotspotDef[] = [
-  {
-    id: "1",
-    title: "Washington Canyon Break",
-    confidence: 88,
-    sstTemp: 76,
-    breakDelta: 4.2,
-    lat: 37.55,
-    lng: -74.35,
-    species: ["Yellowfin Tuna", "Mahi Mahi"],
-  },
-  {
-    id: "2",
-    title: "Norfolk Canyon Edge",
-    confidence: 82,
-    sstTemp: 74,
-    breakDelta: 3.1,
-    lat: 37.05,
-    lng: -74.65,
-    species: ["Bluefin Tuna", "Wahoo"],
-  },
-  {
-    id: "3",
-    title: "Baltimore Canyon Warm Pocket",
-    confidence: 76,
-    sstTemp: 78,
-    breakDelta: 2.8,
-    lat: 38.22,
-    lng: -73.82,
-    species: ["Mahi Mahi", "White Marlin"],
-  },
-  {
-    id: "4",
-    title: "Hudson Canyon Rip",
-    confidence: 71,
-    sstTemp: 72,
-    breakDelta: 2.2,
-    lat: 39.52,
-    lng: -72.05,
-    species: ["Bigeye Tuna", "Swordfish"],
-  },
-  {
-    id: "5",
-    title: "Wilmington Canyon Ledge",
-    confidence: 68,
-    sstTemp: 73,
-    breakDelta: 1.9,
-    lat: 38.52,
-    lng: -73.42,
-    species: ["Yellowfin Tuna", "Wahoo"],
-  },
-];
-
-function confidenceColor(c: number) {
-  if (c >= 80) return "#34d399";
-  if (c >= 65) return "#fbbf24";
-  return "#f87171";
+function buildDisplay(defs: HotspotDef[]): HotspotDisplay[] {
+  return defs.map((h) => {
+    const breakDelta = parseFloat(
+      Math.max(0, (h.fallbackSstF - 68) * 0.18).toFixed(1),
+    );
+    return {
+      id: h.id,
+      title: h.title,
+      confidence: computeConfidence(h.fallbackSstF, breakDelta),
+      sstTemp: h.fallbackSstF,
+      breakDelta,
+      lat: h.lat,
+      lng: h.lng,
+      species: speciesFromSST(h.fallbackSstF),
+    };
+  });
 }
+
+const HOTSPOTS: HotspotDisplay[] = buildDisplay(HOTSPOT_DEFS);
 
 const BATHY_BASE_TILE =
   "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}";
@@ -153,16 +90,22 @@ function sstFallbackLabel(reason: "timeout" | "land" | "error"): string {
   return "unavailable";
 }
 
+function clickBBox(lat: number, lng: number): BBoxQuery {
+  return hotspotBBox(lat, lng, HOTSPOT_BBOX_PAD);
+}
+
 function renderPopup(
   lat: number,
   lng: number,
   td: { w: string; x: string },
   sstText: string,
   wpId: string,
+  meta?: string,
 ): string {
   return `<div style="color:#cbd5e1;font-size:12px;min-width:190px">
     <div style="color:#67e8f9;font-weight:600;margin-bottom:4px">${lat.toFixed(4)}°N, ${Math.abs(lng).toFixed(4)}°W</div>
     <div style="color:#fb923c;margin-bottom:2px">🌡 SST: ${sstText}</div>
+    ${meta ? `<div style="color:#64748b;font-size:10px;margin-bottom:4px">${meta}</div>` : ""}
     <div style="color:#94a3b8;font-size:11px;margin-bottom:6px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
     <input id="wp-name-${wpId}" placeholder="Waypoint name…" style="width:100%;background:#1e293b;border:1px solid #475569;border-radius:5px;color:#e2e8f0;font-size:11px;padding:4px 7px;outline:none;box-sizing:border-box" />
     <button id="wp-save-${wpId}" style="margin-top:5px;width:100%;background:#0891b2;border:none;border-radius:5px;color:#fff;font-size:11px;font-weight:600;padding:5px 0;cursor:pointer">💾 Save Waypoint</button>
@@ -371,13 +314,19 @@ export default function TacticalMap() {
       };
       popup.on("add", wireSave);
 
-      const result = await getSSTCached(lat, lng);
+      const bbox = clickBBox(lat, lng);
+      const result = await getSSTBBoxCached(bbox);
       if (!map.hasLayer(popup)) return;
 
-      const sstText = result.ok
-        ? `${result.fahrenheit.toFixed(1)}°F (${result.celsius.toFixed(1)}°C)`
-        : sstFallbackLabel(result.reason);
-      popup.setContent(renderPopup(lat, lng, td, sstText, wpId));
+      let sstText: string;
+      let meta: string | undefined;
+      if (result.ok) {
+        sstText = `${result.fahrenheit.toFixed(1)}°F (${result.celsius.toFixed(1)}°C)`;
+        meta = `${result.dataset} · ${result.resolution} · ${result.pixelCount}px avg`;
+      } else {
+        sstText = sstFallbackLabel(result.reason);
+      }
+      popup.setContent(renderPopup(lat, lng, td, sstText, wpId, meta));
       wireSave();
     });
 
@@ -652,7 +601,7 @@ export default function TacticalMap() {
           <span className="text-xs text-red-400">85°F</span>
         </div>
         <div className="text-xs text-slate-500 mt-1">
-          GIBS visual · ERDDAP point · {gibsSSTLabel(sstOffset)} · {SST_DATE}
+          GIBS visual · ERDDAP bbox · {gibsSSTLabel(sstOffset)} · {SST_DATE}
         </div>
       </div>
     </div>

@@ -18,6 +18,27 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (Unify SST — Step 3/3: Extract shared hotspot defs + helpers to src/lib/hotspots.ts — COMPLETE)
+- Created `src/lib/hotspots.ts`: exports `HOTSPOT_DEFS`, `HotspotDef`, `hotspotBBox`, `HOTSPOT_BBOX_PAD`, `speciesFromSST`, `computeConfidence`, `confidenceColor`, `haversineNm`, `toLoranTD`
+- `TacticalMap/index.tsx`: removed all locally-defined duplicates; imports 9 symbols from `../../lib/hotspots`; `clickBBox` now delegates to `hotspotBBox(lat, lng, HOTSPOT_BBOX_PAD)`
+- `Hotspots/index.tsx`: removed `HOTSPOT_DEFS`, `Hotspot` interface, `hotspotBBox`, `speciesFromSST`, `computeConfidence`, `confidenceColor`, `haversineNm`, `toLoranTD`; imports from `../../lib/hotspots`
+- Full plan complete: both views now share a single source of truth for hotspot coords, scores, LORAN math, and bbox padding
+
+## 2026-05-30 (Unify SST — Step 2/3: Sync TacticalMap HOTSPOTS[] with HOTSPOT_DEFS[])
+## 2026-05-30 (Unify SST — Step 2/3: Sync TacticalMap HOTSPOTS[] with HOTSPOT_DEFS[])
+- Replaced hardcoded static HOTSPOTS[] with HOTSPOT_DEFS[] matching Hotspots/index.tsx coords + fallbackSstF
+- Added `speciesFromSST()` and `computeConfidence()` mirroring Hotspots — same formula, same caps
+- `buildDisplay()` derives confidence/breakDelta/species from fallbackSstF at module load
+- TacticalMap hotspot markers and popups now render from the same 5 authoritative coord+temp definitions
+- Step 3/3 next: extract shared hotspot defs + bbox helper into src/lib/hotspots.ts
+
+## 2026-05-30 (Unify SST — Step 1/3: TacticalMap click popup → getSSTBBoxCached)
+- Replaced `getSSTCached` (point query) with `getSSTBBoxCached` (±0.15° bbox) in map click handler
+- `clickBBox()` helper builds `BBoxQuery` from clicked lat/lng with `BBOX_PAD = 0.15` — matches Hotspots `bboxPad`
+- Popup now shows dataset/resolution/pixel-count metadata line when SST fetch succeeds
+- Legend footer updated from "ERDDAP point" to "ERDDAP bbox" for accuracy
+- Step 2/3 next: sync HOTSPOTS[] static fallback data with HOTSPOT_DEFS[]
+
 ## 2026-05-29 (Fix SST animation halt — root cause: unstable useMutation dep)
 - Real bug: `useMutation` returns fresh `createWaypoint` ref on every render → `useCallback([createWaypoint])` produced new `addWaypoint` identity → map `useEffect([addWaypoint])` re-ran cleanup (calling `clearInterval`) after each `setSstOffset` tick
 - Fix: replaced `addWaypoint` useCallback with `addWaypointRef` (ref updated via no-dep effect) — ref stays current without being a reactive dep

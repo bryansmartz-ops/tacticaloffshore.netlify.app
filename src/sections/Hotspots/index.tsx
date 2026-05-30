@@ -16,160 +16,17 @@ import {
   formatSST,
   gibsSSTDate,
   type SSTResult,
-  type BBoxQuery,
 } from "../../lib/erddap";
-
-interface Hotspot {
-  id: string;
-  title: string;
-  /** fallback SST (°F) used when ERDDAP returns no data */
-  fallbackSstF: number;
-  lat: number;
-  lng: number;
-  /** lat/lng of a nearby "ambient" shelf point used to compute breakDelta */
-  ambientLat: number;
-  ambientLng: number;
-  /** bounding-box half-width in degrees; default 0.12 (~13 km) for canyon-scale queries */
-  bboxPad?: number;
-}
-
-/** Build a BBoxQuery centred on a lat/lng with the hotspot's pad */
-function hotspotBBox(lat: number, lng: number, pad: number): BBoxQuery {
-  return {
-    minLat: lat - pad,
-    maxLat: lat + pad,
-    minLng: lng - pad,
-    maxLng: lng + pad,
-  };
-}
-
-/** Static geographic definitions — no scores, no species here */
-const HOTSPOT_DEFS: Hotspot[] = [
-  {
-    id: "1",
-    title: "Washington Canyon Break",
-    fallbackSstF: 76,
-    lat: 37.55,
-    lng: -74.35,
-    ambientLat: 37.55,
-    ambientLng: -73.6,
-    bboxPad: 0.15,
-  },
-  {
-    id: "2",
-    title: "Norfolk Canyon Edge",
-    fallbackSstF: 74,
-    lat: 37.05,
-    lng: -74.65,
-    ambientLat: 37.05,
-    ambientLng: -73.9,
-    bboxPad: 0.15,
-  },
-  {
-    id: "3",
-    title: "Baltimore Canyon Warm Pocket",
-    fallbackSstF: 78,
-    lat: 38.22,
-    lng: -73.82,
-    ambientLat: 38.22,
-    ambientLng: -73.1,
-    bboxPad: 0.15,
-  },
-  {
-    id: "4",
-    title: "Hudson Canyon Rip",
-    fallbackSstF: 72,
-    lat: 39.52,
-    lng: -72.05,
-    ambientLat: 39.52,
-    ambientLng: -71.3,
-    bboxPad: 0.15,
-  },
-  {
-    id: "5",
-    title: "Wilmington Canyon Ledge",
-    fallbackSstF: 73,
-    lat: 38.52,
-    lng: -73.42,
-    ambientLat: 38.52,
-    ambientLng: -72.7,
-    bboxPad: 0.15,
-  },
-];
-
-// ---------------------------------------------------------------------------
-// Live scoring helpers
-// ---------------------------------------------------------------------------
-
-/** Derive likely species from SST in °F */
-function speciesFromSST(tempF: number): string[] {
-  const list: string[] = [];
-  if (tempF >= 60 && tempF <= 68) list.push("Bluefin Tuna");
-  if (tempF >= 65 && tempF <= 75) list.push("Bigeye Tuna");
-  if (tempF >= 70 && tempF <= 80) list.push("Yellowfin Tuna");
-  if (tempF >= 70) list.push("White Marlin");
-  if (tempF >= 74) list.push("Wahoo");
-  if (tempF >= 78) list.push("Mahi Mahi");
-  if (tempF < 65) list.push("Swordfish");
-  // cap at 3 species
-  return list.slice(0, 3);
-}
-
-/**
- * Compute confidence % from live SST (°F) and breakDelta (°F).
- * Formula:
- *   base 50
- *   + up to 25 pts for warm SST (peak at 76-78 °F for mid-Atlantic summer run)
- *   + up to 25 pts for strong thermal break (ΔT ≥ 4°F = full bonus)
- * Result clamped 40–95.
- */
-function computeConfidence(tempF: number, breakDelta: number): number {
-  const sstScore = Math.max(0, Math.min(25, ((tempF - 65) / 15) * 25));
-  const breakScore = Math.max(0, Math.min(25, (breakDelta / 4) * 25));
-  return Math.round(Math.min(95, Math.max(40, 50 + sstScore + breakScore)));
-}
-
-const MASTER = { lat: 42.7137, lng: -76.8246 };
-const SEC_W = { lat: 46.8, lng: -67.9266 };
-const SEC_X = { lat: 41.253, lng: -69.9775 };
-const ED_W = 28691;
-const ED_X = 41657;
-const C_US_PER_NM = 6.177;
-
-function haversineNm(
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-): number {
-  const R = 3440.065;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
-function toLoranTD(lat: number, lng: number) {
-  const dM = haversineNm(lat, lng, MASTER.lat, MASTER.lng);
-  const dW = haversineNm(lat, lng, SEC_W.lat, SEC_W.lng);
-  const dX = haversineNm(lat, lng, SEC_X.lat, SEC_X.lng);
-  const tdW = ED_W + (dM - dW) * C_US_PER_NM;
-  const tdX = ED_X + (dM - dX) * C_US_PER_NM;
-  return {
-    w: (tdW >= 0 ? "+" : "") + Math.round(tdW),
-    x: (tdX >= 0 ? "+" : "") + Math.round(tdX),
-  };
-}
-
-function confidenceColor(c: number) {
-  if (c >= 80) return "#34d399";
-  if (c >= 65) return "#fbbf24";
-  return "#f87171";
-}
+import {
+  haversineNm,
+  toLoranTD,
+  speciesFromSST,
+  computeConfidence,
+  confidenceColor,
+  hotspotBBox,
+  HOTSPOT_DEFS,
+} from "../../lib/hotspots";
+import type { HotspotDef } from "../../lib/hotspots";
 
 // Per-hotspot computed prediction state
 interface HotspotPrediction {
