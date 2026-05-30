@@ -28,11 +28,6 @@ This file powers chat suggestion chips. Keep it focused and actionable.
 
 
 
-<todo id="dashboard-go-nogo-live">
-Wire Dashboard "GO" conditions cell to live weather data
-The Conditions cell in Today&#39;s Outlook always shows static "GO". It should read live buoy data (same NDBC 44009 fetch used in Weather section) and display GO/MARGINAL/NO-GO with correct color.
-</todo>
-
 <todo id="loran-shared-util">
 Extract shared LORAN math to src/lib/loran.ts
 haversineNm + toLoranTD are duplicated in TacticalMap and Hotspots. Move to a shared utility to keep both in sync and reduce bundle size.

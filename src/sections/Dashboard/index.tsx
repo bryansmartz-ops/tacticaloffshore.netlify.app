@@ -12,6 +12,61 @@ import {
 } from "lucide-react";
 import { getSSTBBoxCached, type SSTResult } from "../../lib/erddap";
 
+// ─── NDBC Buoy constants (mirrors Weather/index.tsx) ──────────────────────────
+const NDBC_OBS_URL = "https://www.ndbc.noaa.gov/data/realtime2/44009.txt";
+const WIND_GO = 20; // knots
+const WIND_MARG = 30;
+const WAVE_GO = 6; // feet
+const WAVE_MARG = 9;
+
+function mpsToKt(mps: number): number {
+  return Math.round(mps * 1.94384);
+}
+function mToFt(m: number): number {
+  return parseFloat((m * 3.28084).toFixed(1));
+}
+
+type ConditionStatus = "GO" | "MARGINAL" | "NO-GO" | "loading" | "error";
+
+async function fetchConditionStatus(): Promise<{
+  status: ConditionStatus;
+  wind: number | null;
+  wave: number | null;
+  ts: string;
+}> {
+  try {
+    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(NDBC_OBS_URL)}`;
+    const res = await fetch(proxyUrl);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const lines = text
+      .split("\n")
+      .filter((l) => l.trim() && !l.startsWith("#"));
+    const parts = lines[0]?.trim().split(/\s+/) ?? [];
+    const get = (i: number): number | null => {
+      const v = parseFloat(parts[i]);
+      return isNaN(v) || v === 99 || v === 999 || v === 9999 ? null : v;
+    };
+    const wspd = get(6);
+    const wvht = get(8);
+    const windKt = wspd !== null ? mpsToKt(wspd) : null;
+    const waveFt = wvht !== null ? mToFt(wvht) : null;
+    const month = parts[1]?.padStart(2, "0") ?? "--";
+    const day = parts[2]?.padStart(2, "0") ?? "--";
+    const hour = parts[3]?.padStart(2, "0") ?? "--";
+    const min = parts[4]?.padStart(2, "0") ?? "--";
+    const ts = `${month}/${day} ${hour}:${min}Z`;
+    const wind = windKt ?? 0;
+    const wave = waveFt ?? 0;
+    let status: ConditionStatus = "GO";
+    if (wind >= WIND_MARG || wave >= WAVE_MARG) status = "NO-GO";
+    else if (wind >= WIND_GO || wave >= WAVE_GO) status = "MARGINAL";
+    return { status, wind: windKt, wave: waveFt, ts };
+  } catch {
+    return { status: "error", wind: null, wave: null, ts: "" };
+  }
+}
+
 const quickLinks = [
   {
     to: "/map",
@@ -213,10 +268,17 @@ export default function Dashboard() {
     ratingColor: string;
   } | null>(null);
   const [sstResult, setSSTResult] = useState<SSTResult | null>(null);
+  const [conditions, setConditions] = useState<{
+    status: ConditionStatus;
+    wind: number | null;
+    wave: number | null;
+    ts: string;
+  }>({ status: "loading", wind: null, wave: null, ts: "" });
 
   useEffect(() => {
     setSolunar(getDashboardSolunar());
     getSSTBBoxCached(DASH_SST_BBOX).then(setSSTResult);
+    fetchConditionStatus().then(setConditions);
   }, []);
 
   return (
@@ -249,10 +311,31 @@ export default function Dashboard() {
         <h3 className="font-semibold text-white mb-3">Today&#39;s Outlook</h3>
         <div className="grid grid-cols-2 gap-2 text-center">
           <div className="bg-slate-700/50 rounded-xl py-3 px-2">
-            <div className="text-xl sm:text-2xl font-bold text-emerald-400">
-              GO
+            <div
+              className={`text-xl sm:text-2xl font-bold ${
+                conditions.status === "GO"
+                  ? "text-emerald-400"
+                  : conditions.status === "MARGINAL"
+                    ? "text-amber-400"
+                    : conditions.status === "NO-GO"
+                      ? "text-red-400"
+                      : conditions.status === "loading"
+                        ? "text-slate-500 animate-pulse"
+                        : "text-slate-500"
+              }`}
+            >
+              {conditions.status === "loading"
+                ? "…"
+                : conditions.status === "error"
+                  ? "—"
+                  : conditions.status}
             </div>
             <div className="text-xs text-slate-400 mt-0.5">Conditions</div>
+            {conditions.ts && (
+              <div className="text-[9px] text-slate-600 mt-0.5 truncate">
+                {conditions.ts}
+              </div>
+            )}
           </div>
           <div className="bg-slate-700/50 rounded-xl py-3 px-2">
             <div

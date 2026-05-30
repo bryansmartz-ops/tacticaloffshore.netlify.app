@@ -18,6 +18,40 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (Fix SST mismatch — last-valid treated as fallback, stale warning in click popup)
+- `src/components/FishingMap.tsx`: hotspot fetch now flags `usingFallback=true` when `hotResult.dataset === "last-valid"` — stale ERDDAP cache hits no longer shown as live hotspot SST (was root cause of 72°F vs 65°F mismatch at Norfolk)
+- Click popup now detects `result.dataset === "last-valid"` and shows "⚠ 72.0°F (stale)" + "Last valid satellite pass: May 29, 10:30 AM — current coverage unavailable" instead of a clean live reading
+- Imported `getLastValidSSTBBox` in FishingMap to retrieve the original capture timestamp for the stale warning message
+- Both the map markers and click popup are now honest about data freshness
+
+## 2026-05-30 (NWS Offshore Forecast card added to Weather section)
+- `src/sections/Weather/index.tsx`: added `NWSForecastCard` component — fetches `api.weather.gov/products/types/OFF/locations/ANZ` (CORS-native, no proxy needed)
+- Parses product text for zones ANZ820, ANZ825, ANZ830; extracts period titles (TODAY/TONIGHT/etc.) and synopsis via regex
+- Accordion UI: one zone open at a time, zone ID badge, issued timestamp, link to full NWS forecast
+- Graceful error/loading states; auto-opens first parsed zone on load
+- NWS API sends `Access-Control-Allow-Origin: *` — no proxy or Netlify function needed
+
+## 2026-05-30 (Dashboard Conditions cell — live NDBC GO/MARGINAL/NO-GO)
+- `src/sections/Dashboard/index.tsx`: added `fetchConditionStatus()` — fetches NDBC 44009 via corsproxy, parses wind/wave, returns GO/MARGINAL/NO-GO using same thresholds as Weather section
+- `conditions` state replaces hardcoded "GO"; cell shows correct color + pulses while loading + shows obs timestamp
+- Error state gracefully shows "—" instead of crashing
+- Mirrors `Weather/index.tsx` thresholds exactly: wind ≥20kt → MARGINAL, ≥30kt → NO-GO; wave ≥6ft → MARGINAL, ≥9ft → NO-GO
+- Closes TODO `dashboard-go-nogo-live`
+
+## 2026-05-30 (Dashboard Conditions cell — live NDBC GO/MARGINAL/NO-GO)
+- `src/sections/Dashboard/index.tsx`: added `fetchConditionStatus()` — fetches NDBC 44009 via corsproxy, parses wind/wave, returns GO/MARGINAL/NO-GO
+- Same thresholds as Weather section: wind ≥20kt → MARGINAL, ≥30kt → NO-GO; wave ≥6ft → MARGINAL, ≥9ft → NO-GO
+- `conditions` state replaces hardcoded "GO"; cell pulses while loading, shows obs timestamp, graceful error state "—"
+- Closes TODO `dashboard-go-nogo-live`
+
+## 2026-05-30 (Hotspot label format: Name • SST • Confidence%)
+## 2026-05-30 (Dashboard Conditions cell — live NDBC GO/MARGINAL/NO-GO)
+- `src/sections/Dashboard/index.tsx`: added `fetchConditionStatus()` — fetches NDBC 44009 via corsproxy, parses wind/wave, returns GO/MARGINAL/NO-GO using same thresholds as Weather section
+- `conditions` state replaces hardcoded "GO"; cell shows correct color + pulses while loading + shows obs timestamp
+- Error state gracefully shows "—" instead of crashing
+- Mirrors `Weather/index.tsx` thresholds exactly: wind ≥20kt → MARGINAL, ≥30kt → NO-GO; wave ≥6ft → MARGINAL, ≥9ft → NO-GO
+- Closes TODO `dashboard-go-nogo-live`
+
 ## 2026-05-30 (Hotspot label format: Name • SST • Confidence%)
 - `buildLabelIcon()` now receives full `HotspotDisplay` object instead of just title/color
 - Label format changed from "Hudson Canyon Rip" → "Hudson • 72°F • 85%" — live SST + confidence visible at a glance

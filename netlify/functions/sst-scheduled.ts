@@ -30,41 +30,65 @@ const ERDDAP_ENDPOINTS = [
   "https://erddap.marine.ie/erddap",
 ];
 
+// Mirrors HOTSPOT_DEFS in src/lib/hotspots.ts — keep in sync.
+// Ambient coords are 0.75° west of each hotspot (inshore shelf reference).
 const KNOWN_STRUCTURE = [
-  {
-    name: "Washington Canyon Break",
-    lat: 37.55,
-    lng: -74.35,
-    ambLat: 37.55,
-    ambLng: -73.6,
-  },
-  {
-    name: "Norfolk Canyon Edge",
-    lat: 37.05,
-    lng: -74.65,
-    ambLat: 37.05,
-    ambLng: -73.9,
-  },
-  {
-    name: "Baltimore Canyon Warm Pocket",
-    lat: 38.22,
-    lng: -73.82,
-    ambLat: 38.22,
-    ambLng: -73.1,
-  },
   {
     name: "Hudson Canyon Rip",
     lat: 39.52,
     lng: -72.05,
     ambLat: 39.52,
-    ambLng: -71.3,
+    ambLng: -72.8,
+  },
+  {
+    name: "Spencer Canyon (OC, MD)",
+    lat: 39.05,
+    lng: -72.7,
+    ambLat: 39.05,
+    ambLng: -73.45,
+  },
+  {
+    name: "Atlantis Canyon",
+    lat: 39.38,
+    lng: -72.25,
+    ambLat: 39.38,
+    ambLng: -73.0,
+  },
+  {
+    // Corrected to shelf-break canyon head (~200m isobath) — matches hotspots.ts
+    name: "Baltimore Canyon",
+    lat: 38.01,
+    lng: -74.05,
+    ambLat: 38.01,
+    ambLng: -74.8,
   },
   {
     name: "Wilmington Canyon Ledge",
     lat: 38.52,
     lng: -73.42,
     ambLat: 38.52,
-    ambLng: -72.7,
+    ambLng: -74.15,
+  },
+  {
+    name: "Washington Canyon Break",
+    lat: 37.55,
+    lng: -74.35,
+    ambLat: 37.55,
+    ambLng: -75.1,
+  },
+  {
+    name: "Norfolk Canyon Edge",
+    lat: 37.05,
+    lng: -74.65,
+    ambLat: 37.05,
+    ambLng: -75.4,
+  },
+  {
+    name: "Diamond Shoals / Cape Hatteras",
+    lat: 35.15,
+    lng: -75.2,
+    ambLat: 35.15,
+    ambLng: -75.95,
   },
 ];
 

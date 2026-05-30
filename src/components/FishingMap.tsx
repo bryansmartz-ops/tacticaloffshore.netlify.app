@@ -17,7 +17,11 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import L from "leaflet";
-import { getSSTBBoxCached, gibsSSTTileUrl } from "../lib/erddap";
+import {
+  getSSTBBoxCached,
+  getLastValidSSTBBox,
+  gibsSSTTileUrl,
+} from "../lib/erddap";
 import type { BBoxQuery } from "../lib/erddap";
 import {
   toLoranTD,
@@ -576,7 +580,12 @@ export default function FishingMap({
         getSSTBBoxCached(hotBBox, true),
         getSSTBBoxCached(ambBBox, false),
       ]).then(([hotResult, ambResult]) => {
-        const usingFallback = !hotResult.ok;
+        // Treat last-valid cache hits as fallback — stale data should not
+        // be shown as a live hotspot reading.
+        const usingFallback =
+          !hotResult.ok ||
+          (hotResult.ok &&
+            (hotResult as { dataset?: string }).dataset === "last-valid");
         const hotF = hotResult.ok ? hotResult.fahrenheit : h.fallbackSstF;
         const ambF = ambResult.ok ? ambResult.fahrenheit : hotF - 2.0;
         const breakDelta = parseFloat(Math.max(0, hotF - ambF).toFixed(1));
@@ -790,9 +799,27 @@ export default function FishingMap({
       let meta: string | undefined;
       let sstF: number | null = null;
       if (result.ok) {
-        sstF = result.fahrenheit;
-        sstText = `${result.fahrenheit.toFixed(1)}°F (${result.celsius.toFixed(1)}°C)`;
-        meta = `${result.dataset} · ${result.resolution} · ${result.pixelCount}px avg`;
+        const isStale =
+          (result as { dataset?: string }).dataset === "last-valid";
+        if (isStale) {
+          sstF = result.fahrenheit;
+          // Look up when this reading was actually captured
+          const lv = getLastValidSSTBBox(bbox);
+          const ageStr = lv
+            ? new Date(lv.fetchedAt).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "unknown date";
+          sstText = `⚠ ${result.fahrenheit.toFixed(1)}°F (stale)`;
+          meta = `Last valid satellite pass: ${ageStr} — current coverage unavailable`;
+        } else {
+          sstF = result.fahrenheit;
+          sstText = `${result.fahrenheit.toFixed(1)}°F (${result.celsius.toFixed(1)}°C)`;
+          meta = `${result.dataset} · ${result.resolution} · ${result.pixelCount}px avg`;
+        }
       } else {
         sstText = sstFallbackLabel(result.reason);
       }
