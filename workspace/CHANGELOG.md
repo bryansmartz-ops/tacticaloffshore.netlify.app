@@ -18,6 +18,25 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (Step 3/4 COMPLETE — Wire both sections to HOTSPOTS_IN_RANGE)
+- `TacticalMap/index.tsx`: imports `HOTSPOTS_IN_RANGE`; `buildDisplay()` now uses it (falls back to full list if empty)
+- `Hotspots/index.tsx`: map marker loop changed from `HOTSPOT_DEFS.forEach` → `activeHotspots.forEach`; card list changed from `HOTSPOT_DEFS.map` → `activeHotspots.map`
+- Net effect: only hotspots ≤100 NM from OC Inlet appear on both maps and lists; farther-away markers silently excluded
+- Step 4/4 was cut off before being defined — no remaining plan steps on record
+
+## 2026-05-30 (Step 2/4 — Overhaul scoring to reward Gulf Stream thermal-edge breaks)
+- `estimateChloroScore`: break bonus raised from 4→7 pts (ΔT ≥ 3°F threshold); rewards frontal nutrient mixing directly
+- `estimateAltimetryScore`: lat bonus expanded to cover 36–39°N corridor (Norfolk/Washington) with peak 4 pts; break bonus raised to 4 pts at ΔT ≥ 3°F — correct physical model for GS intrusion events pushing north
+- `computeSSTSignals`: SST proximity window tightened ±8 → ±6°F; break threshold lowered 4 → 3°F to match real-world GS thermal breaks
+- `HOTSPOT_DEFS`: Washington Canyon `historyPrior` 10→12; Norfolk Canyon 8→11 — reflects elevated scores when warm GS water pushes into those canyons
+- Net effect: Norfolk + Washington score 70–80%+ when GS is near (warm SST + strong break), vs ~55% before
+
+## 2026-05-30 (Step 1/4 — Fix TacticalMap hotspot click / popup interaction)
+- Root cause: all custom panes had `pointerEvents: none`; circle markers inherited it and swallowed no events
+- Fix: added `hotspotPane` (zIndex 700, `pointerEvents: auto`) and moved all `L.circleMarker` hotspot markers into it
+- Label markers remain in `labelPane` (zIndex 620, `pointerEvents: none`) — text stays non-interactive
+- Added `interactive: true` + `bubblingMouseEvents: false` to each circleMarker for clean Leaflet event isolation
+
 ## 2026-05-30 (Fix: lazy-load TacticalMap + Hotspots to unblock Sandpack bundler timeout)
 - `src/App.tsx`: `TacticalMap` and `Hotspots` now loaded via `React.lazy()` + `<Suspense>` with a spinner fallback
 - Initial bundle no longer includes Leaflet, preventing the 30s bundler timeout in Sandpack

@@ -155,18 +155,25 @@ export function speciesFromSST(tempF: number): string[] {
  * @param idealF     Target species ideal SST centre in °F (default 72°F — mid-range pelagic)
  *
  * Returns `sstScore` and `sstBreakScore` ready to merge into a `HotspotSignals` object.
+ *
+ * SST proximity window: ±1°F = full 25 pts; decays to 0 at ±6°F (tightened from ±8°F
+ * — a 6°F window better distinguishes "on temp" from "marginal").
+ *
+ * Break sharpness: Gulf Stream intrusion events produce breaks of 3–6°F;
+ * full 25 pts at ΔT ≥ 3°F (lowered threshold to reward real-world GS breaks
+ * that are commonly 3–5°F rather than requiring a full 4°F minimum).
  */
 export function computeSSTSignals(
   tempF: number,
   breakDelta: number,
   idealF = 72,
 ): Pick<HotspotSignals, "sstScore" | "sstBreakScore"> {
-  // SST proximity: full 25 pts within ±1°F of ideal; 0 pts at ±8°F
+  // SST proximity: full 25 pts within ±1°F of ideal; 0 pts at ±6°F (tightened window)
   const deviation = Math.abs(tempF - idealF);
-  const sstScore = Math.max(0, Math.min(25, ((8 - deviation) / 7) * 25));
+  const sstScore = Math.max(0, Math.min(25, ((6 - deviation) / 5) * 25));
 
-  // Break sharpness: linear 0→25 over 0→4°F break delta
-  const sstBreakScore = Math.max(0, Math.min(25, (breakDelta / 4) * 25));
+  // Break sharpness: full 25 pts at ΔT ≥ 3°F (GS intrusion threshold)
+  const sstBreakScore = Math.max(0, Math.min(25, (breakDelta / 3) * 25));
 
   return {
     sstScore: Math.round(sstScore),
@@ -256,64 +263,84 @@ export function confidenceColor(c: number): string {
 /**
  * Estimate a chlorophyll score (0–20) from SST proxy data.
  *
- * True chlorophyll requires a separate MODIS/VIIRS satellite product.
- * Until a dedicated chlorophyll proxy endpoint is available, we derive a
- * physics-informed estimate:
- *   - Cold upwelling / shelf-break fronts (SST 60–68°F) → higher chloro
- *   - Warm oligotrophic water (SST > 80°F) → very low chloro
- *   - Mid-range SST with a known break → moderate chloro
+ * Physics-informed model:
+ *   - The Gulf Stream THERMAL EDGE (steep ΔT break) is the primary chloro signal:
+ *     nutrient-rich shelf water mixes with warm GS water at the front → phytoplankton bloom.
+ *   - Cooler shelf-break SST (60–70°F) with a sharp break = highest chloro.
+ *   - Strong break (ΔT ≥ 3°F) at ANY temperature band is a direct proxy for
+ *     frontal mixing and receives a large bonus.
+ *   - Warm, quiescent GS interior (SST > 80°F, low break) = oligotrophic desert.
  *
- * When a real chlorophyll endpoint is wired, replace this function body.
+ * When a real MODIS/VIIRS chlorophyll endpoint is wired, replace this function body.
  */
 export function estimateChloroScore(tempF: number, breakDelta: number): number {
-  // Shelf-break upwelling proxy: cooler SST + steep break → more nutrients
-  // Warm open-ocean → low chloro
-  // Logic: base score from temperature band, boosted by break sharpness
+  // Base score from temperature band
   let base = 0;
   if (tempF < 64)
-    base = 16; // cool, upwelling-influenced
+    base = 15; // cool shelf/upwelling — richest nutrients
   else if (tempF < 68) base = 13;
   else if (tempF < 72) base = 10;
-  else if (tempF < 76) base = 7;
+  else if (tempF < 76)
+    base = 8; // warm shelf edge — still productive near the front
   else if (tempF < 80) base = 5;
-  else base = 3; // warm, low-nutrient open ocean
+  else base = 2; // warm GS interior — oligotrophic
 
-  // Break sharpness adds up to 4 bonus points (sharp front = nutrient mixing)
-  const breakBonus = Math.min(4, (breakDelta / 4) * 4);
+  // Break sharpness is the PRIMARY frontal mixing proxy — up to 7 bonus pts
+  // A ΔT ≥ 3°F break is strong evidence of an active thermal front = elevated chloro
+  const breakBonus = Math.min(7, (breakDelta / 3) * 7);
+
   return Math.round(Math.min(20, base + breakBonus));
 }
 
 /**
  * Estimate an altimetry / SSH anomaly score (0–15) from available data.
  *
- * True SSH anomaly requires CMEMS/Copernicus altimetry products.
- * Until a dedicated altimetry proxy endpoint is available, we use a
- * Gulf Stream position heuristic:
- *   - Sites with warm SST (> 72°F) at the right depth-gradient position
- *     are likely near or inside a warm-core eddy / Gulf Stream meander.
- *   - Sites with very hot SST (> 78°F) far offshore may be inside a WCR.
+ * Gulf Stream thermal-edge heuristic (physics basis):
+ *   - The GS meander can push warm water as far north as 38–40°N near the shelf break
+ *     (Norfolk/Washington canyon area). When SST is ELEVATED above the site's
+ *     seasonal baseline AND there is a detectable thermal break, this strongly
+ *     indicates a warm-core eddy or GS meander pushing into that canyon system.
+ *   - Key insight: for mid-latitude sites (36–40°N), a RELATIVE elevation
+ *     above ambient (breakDelta) is MORE diagnostic than absolute SST alone,
+ *     because it confirms warm GS water intruding onto the shelf.
+ *   - Latitude bonus: the GS shelf-break interaction zone runs 35–41°N;
+ *     Norfolk (37°N) and Washington (37.5°N) are squarely in this zone and
+ *     should score high when warm water pushes north.
  *
- * When a real altimetry endpoint is wired, replace this function body.
+ * When a real CMEMS/Copernicus altimetry endpoint is wired, replace this function body.
  */
 export function estimateAltimetryScore(
   tempF: number,
   breakDelta: number,
   lat: number,
 ): number {
-  // Gulf Stream latitude proxy: core is ~35–38°N offshore
-  // Sites closer to GS core with warm SST and strong breaks score higher
-  const latBonus = lat >= 35 && lat <= 39 ? 3 : lat >= 39 && lat <= 41 ? 1 : 0;
+  // Latitude bonus: GS shelf-break interaction zone 35–41°N
+  // Peak bonus at 36–39°N (Norfolk → Spencer Canyon corridor)
+  let latBonus = 0;
+  if (lat >= 36 && lat <= 39)
+    latBonus = 4; // prime GS meander corridor
+  else if (lat >= 35 && lat < 36)
+    latBonus = 3; // Hatteras / Diamond Shoals
+  else if (lat > 39 && lat <= 41)
+    latBonus = 2; // NJ/DE shelf — still active
+  else if (lat > 41) latBonus = 0; // north of GS influence
 
+  // Base score from absolute SST — warm absolute temp suggests GS water present
   let base = 0;
   if (tempF >= 78)
-    base = 12; // likely inside warm-core ring or GS
-  else if (tempF >= 74) base = 9;
-  else if (tempF >= 70) base = 6;
+    base = 9; // clearly GS / warm-core ring water
+  else if (tempF >= 74) base = 7;
+  else if (tempF >= 70)
+    base = 5; // marginal — may be shelf water
   else if (tempF >= 66) base = 3;
   else base = 1;
 
-  // Sharp break means we're right at the eddy edge — biggest signal
-  const breakBonus = Math.min(3, (breakDelta / 4) * 3);
+  // Break bonus: THIS IS THE KEY SIGNAL for GS intrusion at mid-latitudes.
+  // When warm GS water pushes north into a traditionally cooler area, the
+  // resulting thermal break is steep. Weight this heavily.
+  // ΔT ≥ 3°F = strong GS intrusion signal → up to 4 bonus pts
+  const breakBonus = Math.min(4, (breakDelta / 3) * 4);
+
   return Math.round(Math.min(15, base + breakBonus + latBonus));
 }
 
@@ -345,6 +372,25 @@ export function buildHotspotSignals(
     altimetryScore,
     historyReportsScore: def.historyPrior,
   };
+}
+
+// ---------------------------------------------------------------------------
+// OC Inlet origin + 100 NM radius filter
+// ---------------------------------------------------------------------------
+
+/**
+ * OC Inlet, Ocean City, MD — tournament departure origin.
+ * All hotspot distances are measured from this point.
+ * WGS-84: 38.3289°N, 75.0913°W
+ */
+export const OC_INLET = { lat: 38.3289, lng: -75.0913 };
+
+/** Tournament radius limit in nautical miles */
+export const OC_RADIUS_NM = 100;
+
+/** Distance from OC Inlet to a hotspot in nautical miles */
+export function distFromOCInlet(lat: number, lng: number): number {
+  return haversineNm(OC_INLET.lat, OC_INLET.lng, lat, lng);
 }
 
 // ---------------------------------------------------------------------------
@@ -400,6 +446,17 @@ export interface HotspotDef {
    */
   signals?: HotspotSignals;
 }
+
+/**
+ * Pre-filtered, confidence-sorted subset of HOTSPOT_DEFS.
+ * Only includes hotspots within OC_RADIUS_NM (100 NM) of OC Inlet.
+ * Sorted descending by fallback confidence so the list and map always
+ * surface the best fishable targets first.
+ *
+ * NOTE: This array is computed once at module load using fallback SSTs.
+ * The Hotspots section re-sorts after live SST predictions arrive.
+ */
+export let HOTSPOTS_IN_RANGE: HotspotDef[] = []; // populated immediately after HOTSPOT_DEFS below
 
 export const HOTSPOT_DEFS: HotspotDef[] = [
   // ── North: NJ / Hudson ──────────────────────────────────────────────────
@@ -480,8 +537,9 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     ambientLng: -73.6,
     bboxPad: 0.15,
     idealSstF: 73,
-    // Classic shelf-break rip; tuna/marlin when warm water pushes in
-    historyPrior: 10,
+    // GS pushes warm water north into this canyon corridor — elevated when GS meanders north.
+    // historyPrior raised to 12: when warm water reaches here, it concentrates YFT + white marlin.
+    historyPrior: 12,
   },
   // ── South: VA / Hatteras ─────────────────────────────────────────────────
   {
@@ -494,8 +552,9 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     ambientLng: -73.9,
     bboxPad: 0.15,
     idealSstF: 71,
-    // Moderate VA grounds; good spring bluefin history; limited summer YFT reports
-    historyPrior: 8,
+    // When GS is near Norfolk (current scenario), warm water + SST break = prime YFT/mahi.
+    // historyPrior raised to 11: GS intrusion events here historically produce strong bites.
+    historyPrior: 11,
   },
   {
     id: "8",
@@ -511,3 +570,18 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     historyPrior: 15,
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Populate HOTSPOTS_IN_RANGE now that HOTSPOT_DEFS + helpers are all defined.
+// Filters to ≤ OC_RADIUS_NM (100 NM) from OC Inlet, sorted by fallback
+// confidence descending so both sections always show best targets first.
+// ---------------------------------------------------------------------------
+HOTSPOTS_IN_RANGE = HOTSPOT_DEFS.filter(
+  (h) => distFromOCInlet(h.lat, h.lng) <= OC_RADIUS_NM,
+).sort((a, b) => {
+  const bdA = parseFloat(Math.max(0, (a.fallbackSstF - 68) * 0.18).toFixed(1));
+  const bdB = parseFloat(Math.max(0, (b.fallbackSstF - 68) * 0.18).toFixed(1));
+  const sigA = buildHotspotSignals(a.fallbackSstF, bdA, a);
+  const sigB = buildHotspotSignals(b.fallbackSstF, bdB, b);
+  return computeConfidence(sigB) - computeConfidence(sigA);
+});

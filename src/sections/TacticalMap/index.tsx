@@ -28,6 +28,7 @@ import {
   buildHotspotSignals,
   HOTSPOT_BBOX_PAD,
   HOTSPOT_DEFS,
+  HOTSPOTS_IN_RANGE,
 } from "../../lib/hotspots";
 import type { HotspotDef, HotspotSignals } from "../../lib/hotspots";
 import { useQuery, useMutation } from "@animaapp/playground-react-sdk";
@@ -78,7 +79,11 @@ function buildDisplay(defs: HotspotDef[]): HotspotDisplay[] {
   });
 }
 
-const HOTSPOTS: HotspotDisplay[] = buildDisplay(HOTSPOT_DEFS);
+// Use HOTSPOTS_IN_RANGE (≤100 NM from OC Inlet, confidence-sorted).
+// Fall back to the full list only if the filter somehow yields nothing.
+const HOTSPOTS: HotspotDisplay[] = buildDisplay(
+  HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS,
+);
 
 /** Sort hotspots by confidence descending and assign a rank badge */
 function rankBadge(id: string, hotspots: HotspotDisplay[]): string {
@@ -210,6 +215,11 @@ export default function TacticalMap() {
     labelPane.style.zIndex = "620";
     labelPane.style.pointerEvents = "none";
 
+    // Hotspot circles live above all tile / label panes and receive pointer events
+    const hotspotPane = map.createPane("hotspotPane");
+    hotspotPane.style.zIndex = "700";
+    hotspotPane.style.pointerEvents = "auto";
+
     L.tileLayer(
       "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
       {
@@ -268,12 +278,14 @@ export default function TacticalMap() {
       const td = toLoranTD(h.lat, h.lng);
 
       const circle = L.circleMarker([h.lat, h.lng], {
-        pane: "labelPane",
+        pane: "hotspotPane",
         radius: 13,
         color,
         fillColor: color,
         fillOpacity: 0.35,
         weight: 2,
+        interactive: true,
+        bubblingMouseEvents: false,
       });
 
       const labelMarker = L.marker([h.lat, h.lng], {

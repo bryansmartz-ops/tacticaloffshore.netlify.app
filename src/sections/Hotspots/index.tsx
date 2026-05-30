@@ -26,6 +26,7 @@ import {
   hotspotBBox,
   buildHotspotSignals,
   HOTSPOT_DEFS,
+  HOTSPOTS_IN_RANGE,
 } from "../../lib/hotspots";
 import type { HotspotDef, HotspotSignals } from "../../lib/hotspots";
 
@@ -68,9 +69,14 @@ export default function Hotspots() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showMap, setShowMap] = useState(true);
   const initAttemptedRef = useRef(false);
+  // Use HOTSPOTS_IN_RANGE (≤100 NM, confidence-sorted); fall back to full list if
+  // none qualify (e.g. during initial module load before filter runs).
+  const activeHotspots =
+    HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS;
+
   const [predictions, setPredictions] = useState<HotspotPredictions>(() =>
     Object.fromEntries(
-      HOTSPOT_DEFS.map((h) => [
+      activeHotspots.map((h) => [
         h.id,
         { ...staticPrediction(h), loading: true },
       ]),
@@ -126,7 +132,7 @@ export default function Hotspots() {
         },
       ).addTo(map);
 
-      HOTSPOT_DEFS.forEach((h) => {
+      activeHotspots.forEach((h) => {
         const fallbackConf = computeConfidence(h.fallbackSstF, 2.0);
         const color = confidenceColor(fallbackConf);
         const td = toLoranTD(h.lat, h.lng);
@@ -206,12 +212,12 @@ export default function Hotspots() {
     // Mark all as loading
     setPredictions((prev) =>
       Object.fromEntries(
-        HOTSPOT_DEFS.map((h) => [h.id, { ...prev[h.id], loading: true }]),
+        activeHotspots.map((h) => [h.id, { ...prev[h.id], loading: true }]),
       ),
     );
 
     // Fire bbox queries for all hotspot + ambient boxes in parallel
-    HOTSPOT_DEFS.forEach((h) => {
+    activeHotspots.forEach((h) => {
       const pad = h.bboxPad ?? 0.12;
       const hotBBox = hotspotBBox(h.lat, h.lng, pad);
       // Ambient box uses same pad but centred on the shelf point
@@ -318,7 +324,7 @@ export default function Hotspots() {
           GIBS {sstDate} · Cached hourly · Tap card to pan map
         </p>
 
-        {HOTSPOT_DEFS.map((h) => {
+        {activeHotspots.map((h) => {
           const td = toLoranTD(h.lat, h.lng);
           const isSelected = selectedId === h.id;
           const pred = predictions[h.id];
