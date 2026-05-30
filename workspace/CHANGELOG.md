@@ -18,6 +18,26 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (Fix: lazy-load TacticalMap + Hotspots to unblock Sandpack bundler timeout)
+- `src/App.tsx`: `TacticalMap` and `Hotspots` now loaded via `React.lazy()` + `<Suspense>` with a spinner fallback
+- Initial bundle no longer includes Leaflet, preventing the 30s bundler timeout in Sandpack
+- All other routes unchanged; lazy chunks load on first navigation to /map or /hotspots
+
+## 2026-05-30 (Multi-factor hotspot scoring — COMPLETE: TacticalMap wired to full 5-bucket signals)
+- `TacticalMap/index.tsx`: `buildDisplay()` now calls `buildHotspotSignals()` + `computeConfidence(signals)` — legacy 2-arg path fully retired from both views
+- `HotspotDisplay` interface gains `signals: HotspotSignals` field; all HOTSPOTS[] entries carry live-computed 5-bucket breakdown
+- Hotspot popups now render a mini bar-chart for all 5 signal buckets (SST/25, Break/25, Chloro/20, SSH/15, History/15) with color-coded bars
+- Footer note in popups updated to document the new scoring formula
+- Plan complete: both `Hotspots/index.tsx` and `TacticalMap/index.tsx` share one scoring path via `src/lib/hotspots.ts`
+
+## 2026-05-30 (Multi-factor hotspot scoring — Step 1/3: Schema in src/lib/hotspots.ts)
+## 2026-05-30 (Multi-factor hotspot scoring — COMPLETE: TacticalMap wired to full 5-bucket signals)
+- `TacticalMap/index.tsx`: `buildDisplay()` now calls `buildHotspotSignals()` + `computeConfidence(signals)` — legacy 2-arg path fully retired from both views
+- `HotspotDisplay` interface gains `signals: HotspotSignals` field; all HOTSPOTS[] entries carry live-computed 5-bucket breakdown
+- Hotspot popups now render a mini bar-chart for all 5 signal buckets (SST/25, Break/25, Chloro/20, SSH/15, History/15) with color-coded bars
+- Footer note in popups updated to document the new scoring formula
+- Plan complete: both `Hotspots/index.tsx` and `TacticalMap/index.tsx` share one scoring path via `src/lib/hotspots.ts`
+
 ## 2026-05-30 (Multi-factor hotspot scoring — Step 1/3: Schema in src/lib/hotspots.ts)
 - Added `HotspotSignals` interface: 5 buckets (sstScore/25, sstBreakScore/25, chloroScore/20, altimetryScore/15, historyReportsScore/15, max 100)
 - Added `EMPTY_SIGNALS`, `computeSSTSignals()`, `computeChloroScore()`, `computeAltimetryScore()` helpers with inline scoring rules

@@ -25,10 +25,11 @@ import {
   computeConfidence,
   confidenceColor,
   hotspotBBox,
+  buildHotspotSignals,
   HOTSPOT_BBOX_PAD,
   HOTSPOT_DEFS,
 } from "../../lib/hotspots";
-import type { HotspotDef } from "../../lib/hotspots";
+import type { HotspotDef, HotspotSignals } from "../../lib/hotspots";
 import { useQuery, useMutation } from "@animaapp/playground-react-sdk";
 import type { Waypoint } from "@animaapp/playground-react-sdk";
 
@@ -54,6 +55,7 @@ interface HotspotDisplay {
   lat: number;
   lng: number;
   species: string[];
+  signals: HotspotSignals;
 }
 
 function buildDisplay(defs: HotspotDef[]): HotspotDisplay[] {
@@ -61,15 +63,17 @@ function buildDisplay(defs: HotspotDef[]): HotspotDisplay[] {
     const breakDelta = parseFloat(
       Math.max(0, (h.fallbackSstF - 68) * 0.18).toFixed(1),
     );
+    const signals = buildHotspotSignals(h.fallbackSstF, breakDelta, h);
     return {
       id: h.id,
       title: h.title,
-      confidence: computeConfidence(h.fallbackSstF, breakDelta),
+      confidence: computeConfidence(signals),
       sstTemp: h.fallbackSstF,
       breakDelta,
       lat: h.lat,
       lng: h.lng,
       species: speciesFromSST(h.fallbackSstF),
+      signals,
     };
   });
 }
@@ -294,8 +298,52 @@ export default function TacticalMap() {
         h.breakDelta > 0
           ? `🔥 +${h.breakDelta}°F break`
           : `<span style="color:#94a3b8">no break detected</span>`;
+      const sig = h.signals;
+      const signalRows = [
+        {
+          label: "SST proximity",
+          val: sig.sstScore,
+          max: 25,
+          color: "#fb923c",
+        },
+        {
+          label: "Break sharpness",
+          val: sig.sstBreakScore,
+          max: 25,
+          color: "#fbbf24",
+        },
+        {
+          label: "Chlorophyll",
+          val: sig.chloroScore,
+          max: 20,
+          color: "#4ade80",
+        },
+        {
+          label: "Altimetry/SSH",
+          val: sig.altimetryScore,
+          max: 15,
+          color: "#818cf8",
+        },
+        {
+          label: "History/Reports",
+          val: sig.historyReportsScore,
+          max: 15,
+          color: "#67e8f9",
+        },
+      ]
+        .map(
+          (r) =>
+            `<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
+              <span style="font-size:9px;color:#94a3b8;width:88px;flex-shrink:0">${r.label}</span>
+              <div style="flex:1;background:#1e293b;border-radius:3px;height:5px;overflow:hidden">
+                <div style="background:${r.color};width:${Math.round((r.val / r.max) * 100)}%;height:100%;border-radius:3px"></div>
+              </div>
+              <span style="font-size:9px;color:${r.color};width:24px;text-align:right;flex-shrink:0">${r.val}/${r.max}</span>
+            </div>`,
+        )
+        .join("");
       circle.bindPopup(
-        `<div style="color:#cbd5e1;font-size:12px;min-width:200px">
+        `<div style="color:#cbd5e1;font-size:12px;min-width:210px">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;flex-wrap:wrap">
             <span style="color:${color};font-weight:700;font-size:13px">${h.title}</span>
             ${badge}
@@ -304,11 +352,12 @@ export default function TacticalMap() {
             <span style="color:${confColor};font-size:18px;font-weight:800;line-height:1">${h.confidence}%</span>
             <span style="color:#94a3b8;font-size:10px">confidence</span>
           </div>
-          <div style="margin-bottom:3px">🌡 <strong style="color:#fb923c">${h.sstTemp}°F</strong> &nbsp;&nbsp;${breakVal}</div>
+          <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${h.sstTemp}°F</strong> &nbsp;&nbsp;${breakVal}</div>
+          <div style="margin-bottom:4px">${signalRows}</div>
           <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
           <div style="margin-bottom:4px">${speciesTags}</div>
           <div style="color:#475569;font-size:10px;border-top:1px solid #1e293b;padding-top:4px;margin-top:2px">
-            SST: ERDDAP ACSPO L3S 0.02° / MUR NRT 0.01° · Break: hotspot − shelf ambient · Base 50 + SST score + ΔT score
+            Score = SST(25) + Break(25) + Chloro(20) + SSH(15) + History(15) · ERDDAP ACSPO/MUR
           </div>
         </div>`,
         { className: "fishing-map-popup" },
