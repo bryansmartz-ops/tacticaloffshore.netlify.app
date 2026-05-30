@@ -27,6 +27,7 @@ import {
   speciesFromSST,
   computeConfidence,
   buildHotspotSignals,
+  FALLBACK_SST_CONFIDENCE_PENALTY,
 } from "../lib/hotspots";
 import type { HotspotDef, HotspotSignals } from "../lib/hotspots";
 
@@ -44,6 +45,8 @@ export interface HotspotDisplay {
   lng: number;
   species: string[];
   signals: HotspotSignals;
+  /** True when ERDDAP returned no valid pixel and fallbackSstF was used instead. */
+  isFallbackSst: boolean;
 }
 
 export interface FishingMapProps {
@@ -215,8 +218,9 @@ function buildHotspotPopupHtml(
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
       <span style="color:${confColor};font-size:18px;font-weight:800;line-height:1">${h.confidence}%</span>
-      <span style="color:#94a3b8;font-size:10px">confidence${isLoading ? " (fallback)" : " (live)"}</span>
+      <span style="color:#94a3b8;font-size:10px">confidence${isLoading ? " (pending)" : h.isFallbackSst ? " ⚠ fallback SST" : " (live)"}</span>
     </div>
+    ${h.isFallbackSst && !isLoading ? `<div style="background:rgba(251,146,60,0.12);border:1px solid rgba(251,146,60,0.35);border-radius:5px;padding:3px 7px;font-size:10px;color:#fb923c;margin-bottom:5px">⚠ No satellite data — showing hardcoded ${h.sstTemp.toFixed(1)}°F. Score penalised −18 pts.</div>` : ""}
     ${sstLine}
     <div style="margin-bottom:4px">${signalRows}</div>
     <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
@@ -235,16 +239,19 @@ function defToDisplay(h: HotspotDef): HotspotDisplay {
     Math.max(0, (h.fallbackSstF - 68) * 0.18).toFixed(1),
   );
   const signals = buildHotspotSignals(h.fallbackSstF, breakDelta, h);
+  const rawConf = computeConfidence(signals);
   return {
     id: h.id,
     title: h.title,
-    confidence: computeConfidence(signals),
+    // Penalise immediately — we don't know yet whether ERDDAP will succeed
+    confidence: Math.max(0, rawConf - FALLBACK_SST_CONFIDENCE_PENALTY),
     sstTemp: h.fallbackSstF,
     breakDelta,
     lat: h.lat,
     lng: h.lng,
     species: speciesFromSST(h.fallbackSstF),
     signals,
+    isFallbackSst: true,
   };
 }
 
@@ -317,11 +324,18 @@ export default function FishingMap({
         getSSTBBoxCached(hotBBox, true),
         getSSTBBoxCached(ambBBox, false),
       ]).then(([hotResult, ambResult]) => {
+        const usingFallback = !hotResult.ok;
         const hotF = hotResult.ok ? hotResult.fahrenheit : h.fallbackSstF;
         const ambF = ambResult.ok ? ambResult.fahrenheit : hotF - 2.0;
         const breakDelta = parseFloat(Math.max(0, hotF - ambF).toFixed(1));
         const signals = buildHotspotSignals(hotF, breakDelta, h);
-        const confidence = computeConfidence(signals);
+        const rawConf = computeConfidence(signals);
+        // If ERDDAP returned no valid pixel, deduct FALLBACK_SST_CONFIDENCE_PENALTY
+        // so the score visibly reflects uncertainty rather than silently trusting
+        // the hardcoded fallback temperature as real SST data.
+        const confidence = usingFallback
+          ? Math.max(0, rawConf - FALLBACK_SST_CONFIDENCE_PENALTY)
+          : rawConf;
         const display: HotspotDisplay = {
           id: h.id,
           title: h.title,
@@ -332,6 +346,7 @@ export default function FishingMap({
           lng: h.lng,
           species: speciesFromSST(hotF),
           signals,
+          isFallbackSst: usingFallback,
         };
 
         loadingIds.current.delete(h.id);

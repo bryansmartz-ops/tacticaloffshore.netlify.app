@@ -18,6 +18,20 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (Plan Step 2/3 — Detect fallback-SST and degrade confidence score)
+- `src/lib/hotspots.ts`: added `FALLBACK_SST_CONFIDENCE_PENALTY = 18` constant
+- `src/components/FishingMap.tsx`: `HotspotDisplay` gains `isFallbackSst: boolean` field
+- `defToDisplay()` (initial render) and live fetch path both apply −18 pt penalty when `hotResult.ok === false`
+- Hotspot popup now shows amber warning banner `"⚠ No satellite data — hardcoded Xº F. Score penalised −18 pts."` when fallback fires
+- Confidence label changes: loading="(pending)", fallback="⚠ fallback SST", live="(live)"
+
+## 2026-05-30 (Plan Step 1/3 — Fix Baltimore Canyon SST reliability: correct coordinates)
+- `src/lib/hotspots.ts` HOTSPOT_DEFS id="3": lat/lng corrected 38.22/-73.82 → 38.01/-74.05 (actual canyon head on shelf break)
+- ambientLng corrected -74.55 → -74.80 (keeps 0.75° west offset from new hotspot lng)
+- bboxPad widened 0.15 → 0.22 so ERDDAP query captures more shelf-break pixels before timeout
+- Root cause: old coords placed query over deep open ocean where MUR/ACSPO returns no valid pixel → silent 76°F fallback
+- Step 2 next: detect fallback-SST usage in FishingMap fetch logic and degrade confidence score when fallback fires
+
 ## 2026-05-30 (Fix: TacticalMap syntax error — FishingMap source appended after closing brace x2)
 - Root cause: repeated write_to_file concatenation bug — FishingMap.tsx content appended after TacticalMap&#39;s `}` on two separate responses
 - Fix: used write_to_file with TacticalMap-only content (247 lines); FishingMap.tsx unchanged

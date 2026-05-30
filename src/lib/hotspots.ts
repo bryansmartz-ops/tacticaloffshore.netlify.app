@@ -448,6 +448,14 @@ export interface HotspotDef {
 }
 
 /**
+ * Penalty applied to confidence when live SST could not be retrieved and the
+ * hardcoded fallbackSstF was used instead.  A −18 point deduction moves an
+ * otherwise "amber" 65–70% hotspot down into the red zone and visually
+ * signals that the score cannot be trusted as real oceanographic data.
+ */
+export const FALLBACK_SST_CONFIDENCE_PENALTY = 18;
+
+/**
  * Pre-filtered, confidence-sorted subset of HOTSPOT_DEFS.
  * Only includes hotspots within OC_RADIUS_NM (100 NM) of OC Inlet.
  * Sorted descending by fallback confidence so the list and map always
@@ -505,11 +513,18 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     id: "3",
     title: "Baltimore Canyon",
     fallbackSstF: 76,
-    lat: 38.22,
-    lng: -73.82,
-    ambientLat: 38.22,
-    ambientLng: -74.55, // inshore shelf ~0.75° west — cooler shelf water for break reference
-    bboxPad: 0.15,
+    // Corrected to actual shelf-break canyon head (~200m isobath crossover).
+    // Previous coords (38.22, -73.82) sat over deep open ocean where MUR/ACSPO
+    // frequently returns no valid pixel — causing silent fallback to 76°F.
+    // 38.01°N / 74.05°W is the canyon head on the productive shelf edge where
+    // satellite SST pixels reliably exist.
+    lat: 38.01,
+    lng: -74.05,
+    ambientLat: 38.01,
+    ambientLng: -74.8, // inshore shelf ~0.75° west — cooler shelf water for break reference
+    // Widened from 0.15 to 0.22 so the query bbox captures more shelf-break
+    // pixels before timing out — reduces chance of empty ERDDAP response.
+    bboxPad: 0.22,
     idealSstF: 74,
     // Top MD/VA tournament ground — reliably warm Gulf Stream finger; YFT/marlin
     historyPrior: 13,

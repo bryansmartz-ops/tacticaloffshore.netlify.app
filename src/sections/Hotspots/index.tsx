@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
   RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import FishingMap from "../../components/FishingMap";
 import type { HotspotDisplay } from "../../components/FishingMap";
@@ -162,6 +163,7 @@ export default function Hotspots() {
           // Resolve sstResult-like data from liveHotspot for badge display
           const liveEntry = liveHotspots.find((l) => l.id === h.id);
           const hasLiveSST = !!liveEntry && !isLoading;
+          const isFallback = !!liveEntry?.isFallbackSst && !isLoading;
 
           return (
             <div
@@ -202,6 +204,17 @@ export default function Hotspots() {
                 </div>
               </div>
 
+              {/* Fallback SST warning banner */}
+              {isFallback && (
+                <div className="flex items-start gap-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1.5 text-xs text-amber-400">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    No satellite data — showing hardcoded {h.sstTemp.toFixed(1)}
+                    &#176;F. Score penalised −18 pts.
+                  </span>
+                </div>
+              )}
+
               <div className="flex items-center gap-4 text-sm flex-wrap">
                 <div className="flex items-center gap-1">
                   {isLoading ? (
@@ -211,19 +224,30 @@ export default function Hotspots() {
                     </span>
                   ) : (
                     <>
-                      <ThermometerSun className="w-4 h-4 text-orange-400" />
+                      <ThermometerSun
+                        className={`w-4 h-4 ${isFallback ? "text-slate-500" : "text-orange-400"}`}
+                      />
                       <span
                         className={
-                          hasLiveSST ? "text-orange-400" : "text-slate-400"
+                          isFallback
+                            ? "text-slate-500 line-through"
+                            : hasLiveSST
+                              ? "text-orange-400"
+                              : "text-slate-400"
                         }
                       >
                         {h.sstTemp.toFixed(1)}&#176;F
-                        {hasLiveSST && (
-                          <span className="ml-1 text-[9px] text-cyan-400 font-medium uppercase tracking-wide">
-                            live
-                          </span>
-                        )}
                       </span>
+                      {hasLiveSST && !isFallback && (
+                        <span className="ml-1 text-[9px] text-cyan-400 font-medium uppercase tracking-wide">
+                          live
+                        </span>
+                      )}
+                      {isFallback && (
+                        <span className="ml-1 text-[9px] text-amber-500 font-medium uppercase tracking-wide">
+                          fallback
+                        </span>
+                      )}
                     </>
                   )}
                 </div>
@@ -320,6 +344,9 @@ export default function Hotspots() {
                 <div className="text-[10px] text-slate-600 mt-0.5">
                   {def.idealSstF}&#176;F ideal · {def.historyPrior}/15 history
                   score
+                  {isFallback && (
+                    <span className="text-amber-700"> · ⚠ no live SST</span>
+                  )}
                 </div>
               )}
             </div>
