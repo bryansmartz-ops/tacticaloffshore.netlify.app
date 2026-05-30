@@ -18,6 +18,17 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (TacticalMap Housekeeping Steps 2 & 3 — SST key + hotspot labels)
+- SST tap-for-temp key: shrunk to `text-[9px]`/`text-[8px]`, gradient bar `w-16 h-1.5`, moved to `bottom-3 right-3` to avoid overlap with History dialog
+- Hotspot divIcon labels: removed `background`/`border` box; replaced with a `7px` colored circle dot + plain shadowed text — matches hotspot color, no box
+- Both changes in `src/sections/TacticalMap/index.tsx` only
+
+## 2026-05-30 (TacticalMap Housekeeping Step 1/3 — Shrink & reposition SST History dialog)
+- Moved SST History dialog from `bottom-16 left-1/2 -translate-x-1/2` → `bottom-4 left-3` (bottom-left anchor)
+- Reduced width from `min(290px,…)` → `min(230px,…)`; padding from `px-3 py-2` → `px-2 py-1.5`
+- Clock icon shrunk to `w-3 h-3`; Play button to `text-[9px] px-1.5 py-0.5`; grid gap to `gap-0.5`; date buttons to `py-0.5`
+- Footer date text and date-grid buttons all reduced to `text-[9px]`
+
 ## 2026-05-30 (Unify SST — Step 3/3: Extract shared hotspot defs + helpers to src/lib/hotspots.ts — COMPLETE)
 - Created `src/lib/hotspots.ts`: exports `HOTSPOT_DEFS`, `HotspotDef`, `hotspotBBox`, `HOTSPOT_BBOX_PAD`, `speciesFromSST`, `computeConfidence`, `confidenceColor`, `haversineNm`, `toLoranTD`
 - `TacticalMap/index.tsx`: removed all locally-defined duplicates; imports 9 symbols from `../../lib/hotspots`; `clickBBox` now delegates to `hotspotBBox(lat, lng, HOTSPOT_BBOX_PAD)`

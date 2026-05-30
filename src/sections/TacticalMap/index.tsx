@@ -266,7 +266,7 @@ export default function TacticalMap() {
         interactive: false,
         icon: L.divIcon({
           className: "",
-          html: `<div style="background:rgba(15,23,42,0.85);color:${color};border:1px solid ${color};border-radius:6px;padding:2px 7px;font-size:11px;white-space:nowrap;pointer-events:none">${h.title}</div>`,
+          html: `<div style="display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;opacity:0.9"></span><span style="color:#e2e8f0;font-size:11px;font-weight:600;text-shadow:0 0 4px #000,0 0 8px #000,1px 1px 2px #000">${h.title}</span></div>`,
           iconAnchor: [60, -12],
         }),
       });
@@ -489,10 +489,10 @@ export default function TacticalMap() {
         </div>
       )}
 
-      <div className="absolute bottom-16 left-1/2 -translate-x-1/2 z-[1000] bg-slate-900/95 border border-slate-600 rounded-xl px-3 py-2 flex flex-col items-center gap-1.5 w-[min(290px,calc(100vw-80px))]">
-        <div className="flex items-center gap-2 w-full">
-          <Clock className="w-4 h-4 text-cyan-400 shrink-0" />
-          <span className="text-xs text-slate-300 font-semibold flex-1">
+      <div className="absolute bottom-4 left-3 z-[1000] bg-slate-900/95 border border-slate-600 rounded-lg px-2 py-1.5 flex flex-col items-center gap-1 w-[min(230px,calc(100vw-80px))]">
+        <div className="flex items-center gap-1.5 w-full">
+          <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
+          <span className="text-[9px] text-slate-300 font-semibold flex-1">
             SST History
           </span>
           <button
@@ -500,12 +500,12 @@ export default function TacticalMap() {
               setIsAnimating((a) => !a);
               if (!showSST) setShowSST(true);
             }}
-            className={`text-xs px-2.5 py-1 rounded border transition-all min-w-[52px] ${isAnimating ? "bg-cyan-500 border-cyan-400 text-white" : "bg-slate-700 border-slate-500 text-slate-300"}`}
+            className={`text-[9px] px-1.5 py-0.5 rounded border transition-all min-w-[42px] ${isAnimating ? "bg-cyan-500 border-cyan-400 text-white" : "bg-slate-700 border-slate-500 text-slate-300"}`}
           >
             {isAnimating ? "⏹ Stop" : "▶ Play"}
           </button>
         </div>
-        <div className="grid grid-cols-4 gap-1 w-full">
+        <div className="grid grid-cols-4 gap-0.5 w-full">
           {SST_HISTORY_OFFSETS.map((offset) => (
             <button
               key={offset}
@@ -514,7 +514,7 @@ export default function TacticalMap() {
                 setIsAnimating(false);
                 if (!showSST) setShowSST(true);
               }}
-              className={`py-1.5 rounded text-[10px] font-semibold border transition-all text-center leading-tight ${
+              className={`py-0.5 rounded text-[9px] font-semibold border transition-all text-center leading-tight ${
                 sstOffset === offset
                   ? "bg-orange-500 border-orange-400 text-white"
                   : "bg-slate-800 border-slate-600 text-slate-400"
@@ -524,7 +524,7 @@ export default function TacticalMap() {
             </button>
           ))}
         </div>
-        <div className="text-[10px] text-slate-500 self-start">
+        <div className="text-[9px] text-slate-500 self-start">
           {gibsSSTDate(3 + sstOffset)} · MUR 1km
         </div>
       </div>
@@ -591,17 +591,17 @@ export default function TacticalMap() {
         ))}
       </div>
 
-      <div className="absolute bottom-3 left-3 z-[1000] bg-slate-800/90 rounded-lg p-2 border border-slate-700">
-        <div className="text-xs text-slate-400 mb-1">
-          SST — tap map for temp
+      <div className="absolute bottom-3 right-3 z-[1000] bg-slate-900/85 rounded px-1.5 py-1 border border-slate-700/60">
+        <div className="text-[9px] text-slate-400 mb-0.5 leading-none">
+          tap map for temp
         </div>
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-blue-400">60°F</span>
-          <div className="w-24 h-2 rounded bg-gradient-to-r from-blue-500 via-yellow-400 to-red-500" />
-          <span className="text-xs text-red-400">85°F</span>
+        <div className="flex items-center gap-0.5">
+          <span className="text-[8px] text-blue-400">60°</span>
+          <div className="w-16 h-1.5 rounded bg-gradient-to-r from-blue-500 via-yellow-400 to-red-500" />
+          <span className="text-[8px] text-red-400">85°F</span>
         </div>
-        <div className="text-xs text-slate-500 mt-1">
-          GIBS visual · ERDDAP bbox · {gibsSSTLabel(sstOffset)} · {SST_DATE}
+        <div className="text-[8px] text-slate-600 mt-0.5 leading-none">
+          ERDDAP bbox · {gibsSSTLabel(sstOffset)}
         </div>
       </div>
     </div>
