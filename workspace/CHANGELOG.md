@@ -18,6 +18,20 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (Fix: Leaflet DOM side-effects inside React state updater — runtime crash)
+- Root cause: `showNoBanner`, `hideNoBanner`, `onHotspotsResolved` were called inside `setLiveHotspots` updater; React StrictMode double-invokes updaters → Leaflet threw on second DOM mutation
+- Secondary bug: if two promises resolved in the same microtask tick, both updaters saw `loadingIds.current.size === 0` → `onHotspotsResolved` called twice
+- Fix: added `fetchResolutionRef` + `fetchResolution` state; updater only writes to the ref (pure), then `setTimeout(() => setFetchResolution(...), 0)` flushes side-effects safely post-commit
+- New `useEffect([fetchResolution])` owns all Leaflet DOM calls and parent callbacks — runs after React commits
+- Guard: `fetchResolutionRef.current === null` ensures resolution only written once per fetch cycle
+
+## 2026-05-30 (No-Fallback Plan Step 1/4 — Suppress hardcoded-fallback hotspots entirely)
+- `src/lib/hotspots.ts`: `FALLBACK_SST_CONFIDENCE_PENALTY` zeroed to 0 (deprecated; exclusion logic replaces it)
+- `src/components/FishingMap.tsx`: after all ERDDAP fetches complete, `liveEntries = next.filter(e => !e.isFallbackSst)` — if empty, clears all markers + shows amber "⚠ No satellite SST — hotspot detection unavailable" banner; if partial, removes only the failed entries
+- `defToDisplay()`: no longer applies penalty; fallback entries are initial placeholders that get excluded post-fetch
+- `syncMarkers()`: skips `isFallbackSst` entries once `loadingSet.size === 0`; popup confidence label drops the "⚠ fallback SST" text
+- `src/sections/Hotspots/index.tsx`: `allSatelliteUnavailable` empty-state rendered when fetches done but list is empty; fallback warning banner and strikethrough SST removed from card UI
+
 ## 2026-05-30 (Plan Step 2/3 — Detect fallback-SST and degrade confidence score)
 - `src/lib/hotspots.ts`: added `FALLBACK_SST_CONFIDENCE_PENALTY = 18` constant
 - `src/components/FishingMap.tsx`: `HotspotDisplay` gains `isFallbackSst: boolean` field

@@ -58,27 +58,33 @@ export default function Hotspots() {
     [activeHotspotDefs],
   );
 
-  // Use liveHotspots if available, otherwise show spinner cards from defs
-  const displayHotspots: HotspotDisplay[] =
-    liveHotspots.length > 0
-      ? liveHotspots
-      : activeHotspotDefs.map((h) => ({
-          id: h.id,
-          title: h.title,
-          confidence: 50,
-          sstTemp: h.fallbackSstF,
-          breakDelta: 0,
-          lat: h.lat,
-          lng: h.lng,
-          species: [],
-          signals: {
-            sstScore: 0,
-            sstBreakScore: 0,
-            chloroScore: 0,
-            altimetryScore: 0,
-            historyReportsScore: 0,
-          },
-        }));
+  // Whether fetches have all completed (loadingIds empty after first resolution)
+  const fetchesDone = loadingIds.size === 0;
+  // allSatelliteUnavailable is true when fetches are done but resolved to empty list
+  const allSatelliteUnavailable = fetchesDone && liveHotspots.length === 0;
+
+  // Show spinner placeholders while fetching; once done show only live entries.
+  // If all failed, displayHotspots stays empty (handled via empty-state UI below).
+  const displayHotspots: HotspotDisplay[] = fetchesDone
+    ? liveHotspots // already filtered to live-only by FishingMap
+    : activeHotspotDefs.map((h) => ({
+        id: h.id,
+        title: h.title,
+        confidence: 50,
+        sstTemp: h.fallbackSstF,
+        breakDelta: 0,
+        lat: h.lat,
+        lng: h.lng,
+        species: [],
+        isFallbackSst: true,
+        signals: {
+          sstScore: 0,
+          sstBreakScore: 0,
+          chloroScore: 0,
+          altimetryScore: 0,
+          historyReportsScore: 0,
+        },
+      }));
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] overflow-hidden">
@@ -154,16 +160,34 @@ export default function Hotspots() {
           GIBS {sstDate} · Cached hourly · Tap card to pan map
         </p>
 
+        {/* No-satellite empty state */}
+        {allSatelliteUnavailable && (
+          <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+            <AlertTriangle className="w-10 h-10 text-amber-500 opacity-70" />
+            <div className="text-amber-400 font-semibold text-base">
+              No satellite SST available
+            </div>
+            <p className="text-slate-500 text-sm max-w-xs">
+              ERDDAP returned no valid pixels for any hotspot location. Hotspot
+              predictions require live satellite data and cannot be shown using
+              hardcoded fallback temperatures.
+            </p>
+            <p className="text-slate-600 text-xs max-w-xs">
+              This typically resolves within a few hours as satellite passes
+              update the ACSPO / MUR composites. Try refreshing the page.
+            </p>
+          </div>
+        )}
+
         {displayHotspots.map((h) => {
           const td = toLoranTD(h.lat, h.lng);
           const isSelected = selectedId === h.id;
           const isLoading = loadingIds.has(h.id);
           const def = activeHotspotDefs.find((d) => d.id === h.id);
 
-          // Resolve sstResult-like data from liveHotspot for badge display
-          const liveEntry = liveHotspots.find((l) => l.id === h.id);
-          const hasLiveSST = !!liveEntry && !isLoading;
-          const isFallback = !!liveEntry?.isFallbackSst && !isLoading;
+          // All displayed entries are either loading-placeholders or confirmed live
+          const hasLiveSST = !isLoading;
+          const isFallback = false; // fallback entries are excluded before reaching here
 
           return (
             <div
@@ -204,17 +228,6 @@ export default function Hotspots() {
                 </div>
               </div>
 
-              {/* Fallback SST warning banner */}
-              {isFallback && (
-                <div className="flex items-start gap-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg px-2.5 py-1.5 text-xs text-amber-400">
-                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                  <span>
-                    No satellite data — showing hardcoded {h.sstTemp.toFixed(1)}
-                    &#176;F. Score penalised −18 pts.
-                  </span>
-                </div>
-              )}
-
               <div className="flex items-center gap-4 text-sm flex-wrap">
                 <div className="flex items-center gap-1">
                   {isLoading ? (
@@ -224,28 +237,17 @@ export default function Hotspots() {
                     </span>
                   ) : (
                     <>
-                      <ThermometerSun
-                        className={`w-4 h-4 ${isFallback ? "text-slate-500" : "text-orange-400"}`}
-                      />
+                      <ThermometerSun className="w-4 h-4 text-orange-400" />
                       <span
                         className={
-                          isFallback
-                            ? "text-slate-500 line-through"
-                            : hasLiveSST
-                              ? "text-orange-400"
-                              : "text-slate-400"
+                          hasLiveSST ? "text-orange-400" : "text-slate-400"
                         }
                       >
                         {h.sstTemp.toFixed(1)}&#176;F
                       </span>
-                      {hasLiveSST && !isFallback && (
+                      {hasLiveSST && (
                         <span className="ml-1 text-[9px] text-cyan-400 font-medium uppercase tracking-wide">
                           live
-                        </span>
-                      )}
-                      {isFallback && (
-                        <span className="ml-1 text-[9px] text-amber-500 font-medium uppercase tracking-wide">
-                          fallback
                         </span>
                       )}
                     </>
@@ -344,9 +346,6 @@ export default function Hotspots() {
                 <div className="text-[10px] text-slate-600 mt-0.5">
                   {def.idealSstF}&#176;F ideal · {def.historyPrior}/15 history
                   score
-                  {isFallback && (
-                    <span className="text-amber-700"> · ⚠ no live SST</span>
-                  )}
                 </div>
               )}
             </div>

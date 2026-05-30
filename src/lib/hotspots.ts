@@ -449,11 +449,17 @@ export interface HotspotDef {
 
 /**
  * Penalty applied to confidence when live SST could not be retrieved and the
- * hardcoded fallbackSstF was used instead.  A −18 point deduction moves an
- * otherwise "amber" 65–70% hotspot down into the red zone and visually
- * signals that the score cannot be trusted as real oceanographic data.
+ * hardcoded fallbackSstF was used instead.
+ *
+ * NOTE: As of Step 1 of the "No-Fallback" plan, the penalty approach has been
+ * REPLACED by full exclusion — hotspots whose ERDDAP fetch fails are now
+ * removed from the resolved list entirely rather than being shown with a deducted
+ * score.  This constant is kept for backward-compat imports but is no longer
+ * applied anywhere in FishingMap.tsx.
+ *
+ * @deprecated — use isFallbackSst exclusion logic in FishingMap instead.
  */
-export const FALLBACK_SST_CONFIDENCE_PENALTY = 18;
+export const FALLBACK_SST_CONFIDENCE_PENALTY = 0; // was 18 — zeroed so stale callers do no harm
 
 /**
  * Pre-filtered, confidence-sorted subset of HOTSPOT_DEFS.

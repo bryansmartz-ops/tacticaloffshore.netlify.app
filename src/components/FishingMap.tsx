@@ -27,7 +27,6 @@ import {
   speciesFromSST,
   computeConfidence,
   buildHotspotSignals,
-  FALLBACK_SST_CONFIDENCE_PENALTY,
 } from "../lib/hotspots";
 import type { HotspotDef, HotspotSignals } from "../lib/hotspots";
 
@@ -218,9 +217,8 @@ function buildHotspotPopupHtml(
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
       <span style="color:${confColor};font-size:18px;font-weight:800;line-height:1">${h.confidence}%</span>
-      <span style="color:#94a3b8;font-size:10px">confidence${isLoading ? " (pending)" : h.isFallbackSst ? " ⚠ fallback SST" : " (live)"}</span>
+      <span style="color:#94a3b8;font-size:10px">confidence${isLoading ? " (pending)" : " (live)"}</span>
     </div>
-    ${h.isFallbackSst && !isLoading ? `<div style="background:rgba(251,146,60,0.12);border:1px solid rgba(251,146,60,0.35);border-radius:5px;padding:3px 7px;font-size:10px;color:#fb923c;margin-bottom:5px">⚠ No satellite data — showing hardcoded ${h.sstTemp.toFixed(1)}°F. Score penalised −18 pts.</div>` : ""}
     ${sstLine}
     <div style="margin-bottom:4px">${signalRows}</div>
     <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
@@ -232,7 +230,10 @@ function buildHotspotPopupHtml(
 }
 
 // ---------------------------------------------------------------------------
-// Build a fallback HotspotDisplay from a HotspotDef (no live data yet)
+// Build a fallback HotspotDisplay from a HotspotDef (no live data yet).
+// isFallbackSst is TRUE — these are INITIAL placeholders only.
+// After all ERDDAP fetches complete, any entry still marked isFallbackSst
+// will be EXCLUDED from the resolved list (not shown on the map or card list).
 // ---------------------------------------------------------------------------
 function defToDisplay(h: HotspotDef): HotspotDisplay {
   const breakDelta = parseFloat(
@@ -243,8 +244,7 @@ function defToDisplay(h: HotspotDef): HotspotDisplay {
   return {
     id: h.id,
     title: h.title,
-    // Penalise immediately — we don't know yet whether ERDDAP will succeed
-    confidence: Math.max(0, rawConf - FALLBACK_SST_CONFIDENCE_PENALTY),
+    confidence: Math.max(0, rawConf), // no penalty — will be excluded if still fallback after fetch
     sstTemp: h.fallbackSstF,
     breakDelta,
     lat: h.lat,
@@ -311,6 +311,31 @@ export default function FishingMap({
     liveHotspotsRef.current = liveHotspots;
   }, [liveHotspots]);
 
+  // ── No-satellite banner marker ref ───────────────────────────────────────
+  const noBannerRef = useRef<L.Marker | null>(null);
+
+  function showNoBanner(map: L.Map) {
+    if (noBannerRef.current) return; // already showing
+    const banner = L.marker([38.5, -73.5], {
+      pane: "hotspotPane",
+      interactive: false,
+      icon: L.divIcon({
+        className: "",
+        html: `<div style="background:rgba(30,41,59,0.92);border:1px solid rgba(251,146,60,0.6);border-radius:8px;padding:8px 14px;color:#fb923c;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 2px 12px rgba(0,0,0,0.6)">⚠ No satellite SST — hotspot detection unavailable</div>`,
+        iconAnchor: [170, 14],
+      }),
+    });
+    banner.addTo(map);
+    noBannerRef.current = banner;
+  }
+
+  function hideNoBanner() {
+    if (noBannerRef.current) {
+      noBannerRef.current.remove();
+      noBannerRef.current = null;
+    }
+  }
+
   // ── Live SST fetch for all hotspots ──────────────────────────────────────
   useEffect(() => {
     loadingIds.current = new Set(hotspotDefs.map((h) => h.id));
@@ -330,16 +355,11 @@ export default function FishingMap({
         const breakDelta = parseFloat(Math.max(0, hotF - ambF).toFixed(1));
         const signals = buildHotspotSignals(hotF, breakDelta, h);
         const rawConf = computeConfidence(signals);
-        // If ERDDAP returned no valid pixel, deduct FALLBACK_SST_CONFIDENCE_PENALTY
-        // so the score visibly reflects uncertainty rather than silently trusting
-        // the hardcoded fallback temperature as real SST data.
-        const confidence = usingFallback
-          ? Math.max(0, rawConf - FALLBACK_SST_CONFIDENCE_PENALTY)
-          : rawConf;
+
         const display: HotspotDisplay = {
           id: h.id,
           title: h.title,
-          confidence,
+          confidence: rawConf, // no penalty; fallback entries are excluded entirely
           sstTemp: hotF,
           breakDelta,
           lat: h.lat,
@@ -356,8 +376,39 @@ export default function FishingMap({
             existing.id === h.id ? display : existing,
           );
           liveHotspotsRef.current = next;
+
+          // ── When ALL fetches complete: apply exclusion logic ─────────────
           if (loadingIds.current.size === 0) {
-            onHotspotsResolved?.(next);
+            const liveEntries = next.filter((e) => !e.isFallbackSst);
+            const allFallback = liveEntries.length === 0;
+            const map = mapRef.current;
+
+            if (allFallback) {
+              // Every ERDDAP fetch failed — clear markers, show banner
+              if (map) {
+                circleMarkersRef.current.forEach((m) => m.remove());
+                circleMarkersRef.current.clear();
+                labelMarkersRef.current.forEach((m) => m.remove());
+                labelMarkersRef.current.clear();
+                showNoBanner(map);
+              }
+              onHotspotsResolved?.([]);
+            } else {
+              // At least some live SST succeeded — show ONLY live entries
+              hideNoBanner();
+              if (map) {
+                // Remove markers for fallback-only entries
+                next
+                  .filter((e) => e.isFallbackSst)
+                  .forEach((e) => {
+                    circleMarkersRef.current.get(e.id)?.remove();
+                    circleMarkersRef.current.delete(e.id);
+                    labelMarkersRef.current.get(e.id)?.remove();
+                    labelMarkersRef.current.delete(e.id);
+                  });
+              }
+              onHotspotsResolved?.(liveEntries);
+            }
           }
           return next;
         });
@@ -549,7 +600,14 @@ export default function FishingMap({
     spots: HotspotDisplay[],
     loadingSet: Set<string>,
   ) {
-    const incomingIds = new Set(spots.map((h) => h.id));
+    // During initial render (before fetches complete), show ALL placeholder
+    // markers so the map is not empty.  Once fetches complete, the fetch
+    // effect handles exclusion of fallback-only entries directly.
+    const fetchesDone = loadingSet.size === 0;
+    const visibleSpots = fetchesDone
+      ? spots.filter((h) => !h.isFallbackSst)
+      : spots;
+    const incomingIds = new Set(visibleSpots.map((h) => h.id));
 
     // Remove stale markers
     circleMarkersRef.current.forEach((marker, id) => {
@@ -565,14 +623,16 @@ export default function FishingMap({
       }
     });
 
-    spots.forEach((h) => {
+    visibleSpots.forEach((h) => {
       const color = confidenceColor(h.confidence);
       const isLoading = loadingSet.has(h.id);
       const existing = circleMarkersRef.current.get(h.id);
 
       if (existing) {
         existing.setStyle({ color, fillColor: color });
-        existing.setPopupContent(buildHotspotPopupHtml(h, spots, isLoading));
+        existing.setPopupContent(
+          buildHotspotPopupHtml(h, visibleSpots, isLoading),
+        );
         // Update label color dot
         const lbl = labelMarkersRef.current.get(h.id);
         if (lbl) {
@@ -593,12 +653,14 @@ export default function FishingMap({
         bubblingMouseEvents: false,
       });
 
-      circle.bindPopup(buildHotspotPopupHtml(h, spots, isLoading), {
+      circle.bindPopup(buildHotspotPopupHtml(h, visibleSpots, isLoading), {
         className: "fishing-map-popup",
       });
 
       circle.on("click", () => {
         onHotspotClickRef.current?.(h.id);
+        // Re-render popup with current allHotspots list so confidence badge is fresh
+        circle.setPopupContent(buildHotspotPopupHtml(h, visibleSpots, false));
       });
 
       circle.addTo(map);
