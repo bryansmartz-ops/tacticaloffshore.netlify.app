@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState, useCallback } from "react";
 import {
   Target,
   Flame,
@@ -9,265 +9,93 @@ import {
   ChevronUp,
   RefreshCw,
 } from "lucide-react";
-import L from "leaflet";
+import FishingMap from "../../components/FishingMap";
+import type { HotspotDisplay } from "../../components/FishingMap";
+import { getCacheAge, formatSST, gibsSSTDate } from "../../lib/erddap";
 import {
-  getSSTBBoxCached,
-  getCacheAge,
-  formatSST,
-  gibsSSTDate,
-  type SSTResult,
-} from "../../lib/erddap";
-import {
-  haversineNm,
   toLoranTD,
-  speciesFromSST,
-  computeConfidence,
   confidenceColor,
-  hotspotBBox,
-  buildHotspotSignals,
   HOTSPOT_DEFS,
   HOTSPOTS_IN_RANGE,
 } from "../../lib/hotspots";
-import type { HotspotDef, HotspotSignals } from "../../lib/hotspots";
-
-// Per-hotspot computed prediction state
-interface HotspotPrediction {
-  sstResult: SSTResult | null;
-  ambientResult: SSTResult | null;
-  loading: boolean;
-  /** computed from live data; falls back to static when ERDDAP fails */
-  confidence: number;
-  breakDelta: number;
-  species: string[];
-  /** five-bucket signal breakdown for display in detail cards */
-  signals: HotspotSignals;
-}
-
-type HotspotPredictions = Record<string, HotspotPrediction>;
-
-function staticPrediction(h: HotspotDef): HotspotPrediction {
-  // Fallback values derived from the static SST so UI is never empty
-  const breakDelta = parseFloat(
-    Math.max(0, (h.fallbackSstF - 68) * 0.18).toFixed(1),
-  );
-  const signals = buildHotspotSignals(h.fallbackSstF, breakDelta, h);
-  return {
-    sstResult: null,
-    ambientResult: null,
-    loading: false,
-    confidence: computeConfidence(signals),
-    breakDelta,
-    species: speciesFromSST(h.fallbackSstF),
-    signals,
-  };
-}
 
 export default function Hotspots() {
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const markersRef = useRef<L.CircleMarker[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showMap, setShowMap] = useState(true);
-  const initAttemptedRef = useRef(false);
-  // Use HOTSPOTS_IN_RANGE (≤100 NM, confidence-sorted); fall back to full list if
-  // none qualify (e.g. during initial module load before filter runs).
-  const activeHotspots =
-    HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS;
+  const [flyTo, setFlyTo] = useState<
+    { lat: number; lng: number; zoom?: number } | undefined
+  >();
 
-  const [predictions, setPredictions] = useState<HotspotPredictions>(() =>
-    Object.fromEntries(
-      activeHotspots.map((h) => [
-        h.id,
-        { ...staticPrediction(h), loading: true },
-      ]),
-    ),
-  );
+  // Live-resolved hotspot display data — FishingMap calls onHotspotsResolved after SSTs arrive
+  const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
   const [sstDate] = useState(gibsSSTDate);
   const [cacheAge, setCacheAge] = useState<number | null>(getCacheAge);
-
-  // Initialize map once, after a short delay so the flex layout has resolved
-  useEffect(() => {
-    if (initAttemptedRef.current) return;
-    initAttemptedRef.current = true;
-
-    const timerId = setTimeout(() => {
-      const container = mapContainerRef.current;
-      if (!container || mapRef.current) return;
-
-      const map = L.map(container, {
-        center: [38.2, -73.5],
-        zoom: 7,
-        zoomControl: false,
-      });
-
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-        { attribution: "&copy; CartoDB" },
-      ).addTo(map);
-
-      const tileSSTDate = (() => {
-        const d = new Date();
-        d.setDate(d.getDate() - 3);
-        return d.toISOString().slice(0, 10);
-      })();
-
-      L.tileLayer(
-        `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GHRSST_L4_MUR_Sea_Surface_Temperature/default/${tileSSTDate}/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png`,
-        {
-          attribution: "&copy; NASA GIBS",
-          opacity: 0.65,
-          maxNativeZoom: 7,
-          maxZoom: 14,
-          tileSize: 256,
-        },
-      ).addTo(map);
-
-      L.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}",
-        {
-          attribution: "&copy; Esri",
-          opacity: 0.7,
-          maxNativeZoom: 10,
-          maxZoom: 14,
-        },
-      ).addTo(map);
-
-      activeHotspots.forEach((h) => {
-        const fallbackConf = computeConfidence(h.fallbackSstF, 2.0);
-        const color = confidenceColor(fallbackConf);
-        const td = toLoranTD(h.lat, h.lng);
-        const marker = L.circleMarker([h.lat, h.lng], {
-          radius: 12,
-          color,
-          fillColor: color,
-          fillOpacity: 0.35,
-          weight: 2,
-        });
-
-        L.marker([h.lat, h.lng], {
-          icon: L.divIcon({
-            className: "",
-            html: `<div style="background:rgba(15,23,42,0.85);color:${color};border:1px solid ${color};border-radius:6px;padding:2px 6px;font-size:11px;white-space:nowrap;pointer-events:none">${h.title}</div>`,
-            iconAnchor: [60, -10],
-          }),
-          interactive: false,
-        }).addTo(map);
-
-        marker.on("click", () => {
-          setSelectedId((prev) => (prev === h.id ? null : h.id));
-          map.panTo([h.lat, h.lng]);
-        });
-
-        marker.bindPopup(
-          `<div style="color:#cbd5e1;font-size:12px;min-width:160px">
-            <div style="color:${color};font-weight:600;margin-bottom:4px">${h.title}</div>
-            <div>🌡 ${h.fallbackSstF}°F (static fallback)</div>
-            <div style="color:#a78bfa;font-size:11px;margin-top:4px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
-          </div>`,
-          { className: "fishing-map-popup" },
-        );
-
-        marker.addTo(map);
-        markersRef.current.push(marker);
-      });
-
-      mapRef.current = map;
-      map.invalidateSize();
-    }, 150);
-
-    return () => {
-      clearTimeout(timerId);
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-        markersRef.current = [];
-      }
-    };
-  }, []);
-
-  // When showMap toggles back on, wait for the CSS transition then fix tile layout
-  useEffect(() => {
-    if (!showMap || !mapRef.current) return;
-    const t = setTimeout(() => {
-      mapRef.current?.invalidateSize();
-    }, 320);
-    return () => clearTimeout(t);
-  }, [showMap]);
-
-  // Prefetch / serve-from-cache all hotspot SSTs on mount
-  useEffect(() => {
-    loadSSTs(false);
-  }, []);
-
-  function loadSSTs(forceRefresh: boolean) {
-    if (forceRefresh) {
-      try {
-        localStorage.removeItem("sst_cache_v1");
-        localStorage.removeItem("sst_cache_v2");
-      } catch {
-        /* ignore */
-      }
-    }
-
-    // Mark all as loading
-    setPredictions((prev) =>
-      Object.fromEntries(
-        activeHotspots.map((h) => [h.id, { ...prev[h.id], loading: true }]),
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        (HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS).map(
+          (h) => h.id,
+        ),
       ),
-    );
+  );
 
-    // Fire bbox queries for all hotspot + ambient boxes in parallel
-    activeHotspots.forEach((h) => {
-      const pad = h.bboxPad ?? 0.12;
-      const hotBBox = hotspotBBox(h.lat, h.lng, pad);
-      // Ambient box uses same pad but centred on the shelf point
-      const ambBBox = hotspotBBox(h.ambientLat, h.ambientLng, pad);
+  const activeHotspotDefs =
+    HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS;
 
-      Promise.all([
-        getSSTBBoxCached(hotBBox, true),
-        getSSTBBoxCached(ambBBox, false),
-      ]).then(([hotResult, ambResult]) => {
-        setCacheAge(getCacheAge());
-        const hotF = hotResult.ok ? hotResult.fahrenheit : h.fallbackSstF;
-        const ambF = ambResult.ok ? ambResult.fahrenheit : hotF - 2.0;
-        const breakDelta = parseFloat(Math.max(0, hotF - ambF).toFixed(1));
-        const signals = buildHotspotSignals(hotF, breakDelta, h);
-        const confidence = computeConfidence(signals);
-        const species = speciesFromSST(hotF);
+  const handleHotspotsResolved = useCallback((hotspots: HotspotDisplay[]) => {
+    setLiveHotspots(hotspots);
+    setLoadingIds(new Set()); // all resolved
+    setCacheAge(getCacheAge());
+  }, []);
 
-        setPredictions((prev) => ({
-          ...prev,
-          [h.id]: {
-            sstResult: hotResult,
-            ambientResult: ambResult,
-            loading: false,
-            confidence,
-            breakDelta,
-            species,
-            signals,
+  const handleHotspotClick = useCallback(
+    (id: string) => {
+      setSelectedId((prev) => (prev === id ? null : id));
+      const h = activeHotspotDefs.find((x) => x.id === id);
+      if (h) setFlyTo({ lat: h.lat, lng: h.lng, zoom: 9 });
+    },
+    [activeHotspotDefs],
+  );
+
+  // Use liveHotspots if available, otherwise show spinner cards from defs
+  const displayHotspots: HotspotDisplay[] =
+    liveHotspots.length > 0
+      ? liveHotspots
+      : activeHotspotDefs.map((h) => ({
+          id: h.id,
+          title: h.title,
+          confidence: 50,
+          sstTemp: h.fallbackSstF,
+          breakDelta: 0,
+          lat: h.lat,
+          lng: h.lng,
+          species: [],
+          signals: {
+            sstScore: 0,
+            sstBreakScore: 0,
+            chloroScore: 0,
+            altimetryScore: 0,
+            historyReportsScore: 0,
           },
         }));
-      });
-    });
-  }
-
-  // Re-fetch on demand (bypass cache)
-  function refreshSST() {
-    loadSSTs(true);
-  }
-
-  useEffect(() => {
-    if (!selectedId || !mapRef.current) return;
-    const h = HOTSPOT_DEFS.find((x) => x.id === selectedId);
-    if (h) mapRef.current.panTo([h.lat, h.lng]);
-  }, [selectedId]);
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] overflow-hidden">
+      {/* ── Map panel ────────────────────────────────────────────────────── */}
       <div
         className={`relative transition-all duration-300 flex-shrink-0 ${showMap ? "h-[45%]" : "h-0 overflow-hidden"}`}
       >
-        <div ref={mapContainerRef} className="absolute inset-0 z-0" />
+        <FishingMap
+          mode="preview"
+          hotspotDefs={activeHotspotDefs}
+          showSST={true}
+          showBathy={true}
+          showHotspots={true}
+          onHotspotClick={handleHotspotClick}
+          onHotspotsResolved={handleHotspotsResolved}
+          flyTo={flyTo}
+          className="absolute inset-0"
+        />
 
         <button
           onClick={() => setShowMap((v) => !v)}
@@ -283,9 +111,9 @@ export default function Hotspots() {
 
         <div className="absolute bottom-2 left-2 z-[1000] bg-slate-800/80 rounded px-2 py-1 border border-slate-700">
           <div className="flex items-center gap-1">
-            <span className="text-xs text-blue-400">60°F</span>
+            <span className="text-xs text-blue-400">60&#176;F</span>
             <div className="w-16 h-1.5 rounded bg-gradient-to-r from-blue-500 via-yellow-400 to-red-500" />
-            <span className="text-xs text-red-400">85°F</span>
+            <span className="text-xs text-red-400">85&#176;F</span>
           </div>
         </div>
       </div>
@@ -299,24 +127,25 @@ export default function Hotspots() {
         </button>
       )}
 
+      {/* ── Card list ────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
             <Target className="w-5 h-5 text-orange-400" /> AI Hotspots
           </h2>
-          <button
-            onClick={refreshSST}
-            className="flex items-center gap-1.5 text-xs text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 px-2.5 py-1 rounded-lg transition-all"
-            title="Refresh live SST from ERDDAP"
-          >
-            <RefreshCw className="w-3 h-3" />
-            Refresh SST
-          </button>
-          {cacheAge !== null && (
-            <span className="text-xs text-slate-500">
-              Updated {cacheAge === 0 ? "just now" : `${cacheAge} min ago`}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {loadingIds.size > 0 && (
+              <span className="flex items-center gap-1 text-xs text-cyan-400">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                fetching live SST…
+              </span>
+            )}
+            {cacheAge !== null && loadingIds.size === 0 && (
+              <span className="text-xs text-slate-500">
+                Updated {cacheAge === 0 ? "just now" : `${cacheAge} min ago`}
+              </span>
+            )}
+          </div>
         </div>
 
         <p className="text-xs text-slate-500">
@@ -324,20 +153,20 @@ export default function Hotspots() {
           GIBS {sstDate} · Cached hourly · Tap card to pan map
         </p>
 
-        {activeHotspots.map((h) => {
+        {displayHotspots.map((h) => {
           const td = toLoranTD(h.lat, h.lng);
           const isSelected = selectedId === h.id;
-          const pred = predictions[h.id];
-          const isLoading = pred?.loading ?? true;
-          const confidence = pred?.confidence ?? 50;
-          const breakDelta = pred?.breakDelta ?? 0;
-          const species = pred?.species ?? [];
-          const sstResult = pred?.sstResult ?? null;
+          const isLoading = loadingIds.has(h.id);
+          const def = activeHotspotDefs.find((d) => d.id === h.id);
+
+          // Resolve sstResult-like data from liveHotspot for badge display
+          const liveEntry = liveHotspots.find((l) => l.id === h.id);
+          const hasLiveSST = !!liveEntry && !isLoading;
 
           return (
             <div
               key={h.id}
-              onClick={() => setSelectedId(isSelected ? null : h.id)}
+              onClick={() => handleHotspotClick(h.id)}
               className={`bg-slate-800 rounded-xl p-4 border transition-all cursor-pointer space-y-2 ${
                 isSelected
                   ? "border-emerald-500/60 shadow-lg shadow-emerald-900/20"
@@ -349,7 +178,8 @@ export default function Hotspots() {
                   <h3 className="font-semibold text-white">{h.title}</h3>
                   <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
                     <MapPin className="w-3 h-3" />
-                    {h.lat.toFixed(2)}°N, {Math.abs(h.lng).toFixed(2)}°W
+                    {h.lat.toFixed(2)}&#176;N, {Math.abs(h.lng).toFixed(2)}
+                    &#176;W
                   </div>
                 </div>
                 <div className="text-right">
@@ -362,9 +192,9 @@ export default function Hotspots() {
                     <>
                       <div
                         className="text-lg font-bold"
-                        style={{ color: confidenceColor(confidence) }}
+                        style={{ color: confidenceColor(h.confidence) }}
                       >
-                        {confidence}%
+                        {h.confidence}%
                       </div>
                       <div className="text-xs text-slate-500">confidence</div>
                     </>
@@ -382,62 +212,87 @@ export default function Hotspots() {
                   ) : (
                     <>
                       <ThermometerSun className="w-4 h-4 text-orange-400" />
-                      {(() => {
-                        const { text, live } = sstResult
-                          ? formatSST(sstResult, h.fallbackSstF)
-                          : { text: `${h.fallbackSstF}°F`, live: false };
-                        return (
-                          <span
-                            className={
-                              live ? "text-orange-400" : "text-slate-400"
-                            }
-                          >
-                            {text}
-                            {live && (
-                              <span className="ml-1 text-[9px] text-cyan-400 font-medium uppercase tracking-wide">
-                                live
-                              </span>
-                            )}
+                      <span
+                        className={
+                          hasLiveSST ? "text-orange-400" : "text-slate-400"
+                        }
+                      >
+                        {h.sstTemp.toFixed(1)}&#176;F
+                        {hasLiveSST && (
+                          <span className="ml-1 text-[9px] text-cyan-400 font-medium uppercase tracking-wide">
+                            live
                           </span>
-                        );
-                      })()}
+                        )}
+                      </span>
                     </>
                   )}
                 </div>
                 {!isLoading && (
                   <div className="flex items-center gap-1 text-amber-400">
                     <Flame className="w-4 h-4" />
-                    {breakDelta > 0
-                      ? `+${breakDelta}°F break`
+                    {h.breakDelta > 0
+                      ? `+${h.breakDelta}&#176;F break`
                       : "no break detected"}
                   </div>
                 )}
               </div>
 
-              {/* Dataset + resolution + pixel-count badge */}
-              {!isLoading && sstResult?.ok && (
-                <div className="flex items-center gap-2 flex-wrap mt-0.5">
-                  <span
-                    className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full border ${sstResult.resolution === "0.02deg" ? "bg-violet-500/15 border-violet-500/40 text-violet-300" : "bg-sky-500/15 border-sky-500/40 text-sky-300"}`}
-                  >
-                    {sstResult.resolution === "0.02deg"
-                      ? "ACSPO L3S 0.02°"
-                      : "MUR NRT 0.01°"}
-                  </span>
-                  <span className="text-[10px] text-slate-500">
-                    {sstResult.pixelCount} px avg
-                  </span>
-                  {sstResult.resolution === "0.02deg" && (
-                    <span className="text-[10px] text-slate-500">≈2 km/px</span>
-                  )}
-                  {sstResult.resolution === "0.01deg" && (
-                    <span className="text-[10px] text-slate-500">≈1 km/px</span>
-                  )}
-                </div>
-              )}
-              {!isLoading && sstResult && !sstResult.ok && (
-                <div className="text-[10px] text-slate-500 mt-0.5">
-                  ERDDAP unavailable — showing static fallback
+              {/* Signal bucket mini-bars */}
+              {!isLoading && (
+                <div className="space-y-0.5 mt-1">
+                  {[
+                    {
+                      label: "SST",
+                      val: h.signals.sstScore,
+                      max: 25,
+                      color: "#fb923c",
+                    },
+                    {
+                      label: "Break",
+                      val: h.signals.sstBreakScore,
+                      max: 25,
+                      color: "#fbbf24",
+                    },
+                    {
+                      label: "Chloro",
+                      val: h.signals.chloroScore,
+                      max: 20,
+                      color: "#4ade80",
+                    },
+                    {
+                      label: "SSH",
+                      val: h.signals.altimetryScore,
+                      max: 15,
+                      color: "#818cf8",
+                    },
+                    {
+                      label: "History",
+                      val: h.signals.historyReportsScore,
+                      max: 15,
+                      color: "#67e8f9",
+                    },
+                  ].map((r) => (
+                    <div key={r.label} className="flex items-center gap-1.5">
+                      <span className="text-[9px] text-slate-500 w-10 shrink-0">
+                        {r.label}
+                      </span>
+                      <div className="flex-1 bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.round((r.val / r.max) * 100)}%`,
+                            background: r.color,
+                          }}
+                        />
+                      </div>
+                      <span
+                        className="text-[9px] shrink-0"
+                        style={{ color: r.color }}
+                      >
+                        {r.val}/{r.max}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
 
@@ -448,9 +303,9 @@ export default function Hotspots() {
                 </div>
               )}
 
-              {!isLoading && species.length > 0 && (
+              {!isLoading && h.species.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
-                  {species.map((s) => (
+                  {h.species.map((s) => (
                     <span
                       key={s}
                       className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full"
@@ -458,6 +313,13 @@ export default function Hotspots() {
                       {s}
                     </span>
                   ))}
+                </div>
+              )}
+
+              {def && !isLoading && (
+                <div className="text-[10px] text-slate-600 mt-0.5">
+                  {def.idealSstF}&#176;F ideal · {def.historyPrior}/15 history
+                  score
                 </div>
               )}
             </div>

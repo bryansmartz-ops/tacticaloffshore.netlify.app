@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   Layers,
   Thermometer,
@@ -10,134 +10,18 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import L from "leaflet";
-import {
-  getSSTBBoxCached,
-  gibsSSTDate,
-  gibsSSTTileUrl,
-  gibsSSTLabel,
-} from "../../lib/erddap";
-import type { BBoxQuery } from "../../lib/erddap";
-import {
-  haversineNm,
-  toLoranTD,
-  speciesFromSST,
-  computeConfidence,
-  confidenceColor,
-  hotspotBBox,
-  buildHotspotSignals,
-  HOTSPOT_BBOX_PAD,
-  HOTSPOT_DEFS,
-  HOTSPOTS_IN_RANGE,
-} from "../../lib/hotspots";
-import type { HotspotDef, HotspotSignals } from "../../lib/hotspots";
+import FishingMap from "../../components/FishingMap";
+import { gibsSSTDate, gibsSSTLabel } from "../../lib/erddap";
+import { HOTSPOTS_IN_RANGE, HOTSPOT_DEFS } from "../../lib/hotspots";
 import { useQuery, useMutation } from "@animaapp/playground-react-sdk";
 import type { Waypoint } from "@animaapp/playground-react-sdk";
 
-const CANYONS = [
-  { name: "Hudson", lat: 39.52, lng: -72.05 },
-  { name: "Baltimore", lat: 38.22, lng: -73.82 },
-  { name: "Wilmington", lat: 38.52, lng: -73.42 },
-  { name: "Toms", lat: 39.15, lng: -72.95 },
-  { name: "Spencer", lat: 39.05, lng: -72.7 },
-  { name: "Atlantis", lat: 39.38, lng: -72.25 },
-  { name: "Lindenkohl", lat: 38.95, lng: -72.85 },
-  { name: "Washington", lat: 37.55, lng: -74.35 },
-  { name: "Norfolk", lat: 37.05, lng: -74.65 },
-];
-
-// Derive display data from fallback SSTs at module load — replaced by live data
-interface HotspotDisplay {
-  id: string;
-  title: string;
-  confidence: number;
-  sstTemp: number;
-  breakDelta: number;
-  lat: number;
-  lng: number;
-  species: string[];
-  signals: HotspotSignals;
-}
-
-function buildDisplay(defs: HotspotDef[]): HotspotDisplay[] {
-  return defs.map((h) => {
-    const breakDelta = parseFloat(
-      Math.max(0, (h.fallbackSstF - 68) * 0.18).toFixed(1),
-    );
-    const signals = buildHotspotSignals(h.fallbackSstF, breakDelta, h);
-    return {
-      id: h.id,
-      title: h.title,
-      confidence: computeConfidence(signals),
-      sstTemp: h.fallbackSstF,
-      breakDelta,
-      lat: h.lat,
-      lng: h.lng,
-      species: speciesFromSST(h.fallbackSstF),
-      signals,
-    };
-  });
-}
-
-// Use HOTSPOTS_IN_RANGE (≤100 NM from OC Inlet, confidence-sorted).
-// Fall back to the full list only if the filter somehow yields nothing.
-const HOTSPOTS: HotspotDisplay[] = buildDisplay(
-  HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS,
-);
-
-/** Sort hotspots by confidence descending and assign a rank badge */
-function rankBadge(id: string, hotspots: HotspotDisplay[]): string {
-  const sorted = [...hotspots].sort((a, b) => b.confidence - a.confidence);
-  const rank = sorted.findIndex((h) => h.id === id);
-  if (rank === 0)
-    return `<span style="background:#16a34a;color:#fff;font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;letter-spacing:0.05em;vertical-align:middle">PRIMARY</span>`;
-  if (rank === 1)
-    return `<span style="background:#1d4ed8;color:#fff;font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;letter-spacing:0.05em;vertical-align:middle">SECONDARY</span>`;
-  return "";
-}
-
-const BATHY_BASE_TILE =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}";
-const BATHY_OVERLAY_TILE =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
-
 const SST_HISTORY_OFFSETS = [0, 1, 2, 3];
-const SST_DATE = gibsSSTDate();
 
-function sstFallbackLabel(reason: "timeout" | "land" | "error"): string {
-  if (reason === "timeout") return "timed out";
-  if (reason === "land") return "land / no data";
-  return "unavailable";
-}
-
-function clickBBox(lat: number, lng: number): BBoxQuery {
-  return hotspotBBox(lat, lng, HOTSPOT_BBOX_PAD);
-}
-
-function renderPopup(
-  lat: number,
-  lng: number,
-  td: { w: string; x: string },
-  sstText: string,
-  wpId: string,
-  meta?: string,
-): string {
-  return `<div style="color:#cbd5e1;font-size:12px;min-width:190px">
-    <div style="color:#67e8f9;font-weight:600;margin-bottom:4px">${lat.toFixed(4)}°N, ${Math.abs(lng).toFixed(4)}°W</div>
-    <div style="color:#fb923c;margin-bottom:2px">🌡 SST: ${sstText}</div>
-    ${meta ? `<div style="color:#64748b;font-size:10px;margin-bottom:4px">${meta}</div>` : ""}
-    <div style="color:#94a3b8;font-size:11px;margin-bottom:6px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
-    <input id="wp-name-${wpId}" placeholder="Waypoint name…" style="width:100%;background:#1e293b;border:1px solid #475569;border-radius:5px;color:#e2e8f0;font-size:11px;padding:4px 7px;outline:none;box-sizing:border-box" />
-    <button id="wp-save-${wpId}" style="margin-top:5px;width:100%;background:#0891b2;border:none;border-radius:5px;color:#fff;font-size:11px;font-weight:600;padding:5px 0;cursor:pointer">💾 Save Waypoint</button>
-  </div>`;
-}
+const activeHotspotDefs =
+  HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS;
 
 export default function TacticalMap() {
-  const mapRef = useRef<L.Map | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const sstLayersRef = useRef<(L.TileLayer | null)[]>([null, null, null, null]);
-  const bathyBaseRef = useRef<L.TileLayer | null>(null);
-  const bathyOverlayRef = useRef<L.TileLayer | null>(null);
   const [showSST, setShowSST] = useState(true);
   const [showBathy, setShowBathy] = useState(true);
   const [showHotspots, setShowHotspots] = useState(true);
@@ -145,6 +29,9 @@ export default function TacticalMap() {
   const [isAnimating, setIsAnimating] = useState(false);
   const animIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showWaypoints, setShowWaypoints] = useState(false);
+  const [flyTo, setFlyTo] = useState<
+    { lat: number; lng: number; zoom?: number } | undefined
+  >();
 
   const { data: waypointsData } = useQuery("Waypoint", {
     orderBy: { savedAt: "desc" },
@@ -156,28 +43,19 @@ export default function TacticalMap() {
   } = useMutation("Waypoint");
 
   const waypoints: Waypoint[] = waypointsData ?? [];
-  const waypointsRef = useRef<Waypoint[]>(waypoints);
 
-  useEffect(() => {
-    waypointsRef.current = waypoints;
-  }, [waypoints]);
-
-  // Keep addWaypoint in a ref so the map init effect never needs to re-run
-  // when useMutation returns a fresh createWaypoint reference on each render.
-  const addWaypointRef = useRef<
-    (
+  const handleSaveWaypoint = useCallback(
+    async (
       name: string,
       lat: number,
       lng: number,
       tdW: string,
       tdX: string,
-    ) => Promise<void>
-  >(async () => {});
-  useEffect(() => {
-    addWaypointRef.current = async (name, lat, lng, tdW, tdX) => {
+    ) => {
       await createWaypoint({ name, lat, lng, tdW, tdX, savedAt: new Date() });
-    };
-  });
+    },
+    [createWaypoint],
+  );
 
   const deleteWaypoint = useCallback(
     async (id: string) => {
@@ -186,278 +64,7 @@ export default function TacticalMap() {
     [removeWaypoint],
   );
 
-  useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
-
-    const map = L.map(containerRef.current, {
-      center: [38.5, -73.5],
-      zoom: 8,
-      zoomControl: false,
-    });
-
-    const basePane = map.createPane("basePane");
-    basePane.style.zIndex = "100";
-    basePane.style.pointerEvents = "none";
-
-    const bathyBasePane = map.createPane("bathyBasePane");
-    bathyBasePane.style.zIndex = "250";
-    bathyBasePane.style.pointerEvents = "none";
-
-    const sstPane = map.createPane("sstPane");
-    sstPane.style.zIndex = "350";
-    sstPane.style.pointerEvents = "none";
-
-    const bathyOverlayPane = map.createPane("bathyOverlayPane");
-    bathyOverlayPane.style.zIndex = "450";
-    bathyOverlayPane.style.pointerEvents = "none";
-
-    const labelPane = map.createPane("labelPane");
-    labelPane.style.zIndex = "620";
-    labelPane.style.pointerEvents = "none";
-
-    // Hotspot circles live above all tile / label panes and receive pointer events
-    const hotspotPane = map.createPane("hotspotPane");
-    hotspotPane.style.zIndex = "700";
-    hotspotPane.style.pointerEvents = "auto";
-
-    L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-      {
-        attribution: "&copy; CartoDB",
-        pane: "basePane",
-      },
-    ).addTo(map);
-
-    const bathyBase = L.tileLayer(BATHY_BASE_TILE, {
-      attribution: "&copy; Esri",
-      opacity: 0.75,
-      pane: "bathyBasePane",
-      maxNativeZoom: 10,
-      maxZoom: 14,
-    });
-    bathyBaseRef.current = bathyBase;
-    bathyBase.addTo(map);
-
-    SST_HISTORY_OFFSETS.forEach((offset, idx) => {
-      const layer = L.tileLayer(gibsSSTTileUrl(offset), {
-        attribution: "&copy; NASA GIBS",
-        opacity: 0.45,
-        pane: "sstPane",
-        maxNativeZoom: 7,
-        maxZoom: 14,
-        tileSize: 256,
-      });
-      sstLayersRef.current[idx] = layer;
-      if (idx === 0) layer.addTo(map);
-    });
-
-    const bathyOverlay = L.tileLayer(BATHY_OVERLAY_TILE, {
-      attribution: "&copy; Esri",
-      opacity: 0.9,
-      pane: "bathyOverlayPane",
-      maxNativeZoom: 10,
-      maxZoom: 14,
-    });
-    bathyOverlayRef.current = bathyOverlay;
-    bathyOverlay.addTo(map);
-
-    CANYONS.forEach((c) => {
-      L.marker([c.lat, c.lng], {
-        pane: "labelPane",
-        interactive: false,
-        icon: L.divIcon({
-          className: "",
-          html: `<div style="color:#e2e8f0;font-size:11px;font-weight:700;white-space:nowrap;text-shadow:0 0 4px #000,0 0 8px #000,1px 1px 2px #000,-1px -1px 2px #000;letter-spacing:0.03em">${c.name}</div>`,
-          iconAnchor: [40, 10],
-        }),
-      }).addTo(map);
-    });
-
-    HOTSPOTS.forEach((h) => {
-      const color = confidenceColor(h.confidence);
-      const td = toLoranTD(h.lat, h.lng);
-
-      const circle = L.circleMarker([h.lat, h.lng], {
-        pane: "hotspotPane",
-        radius: 13,
-        color,
-        fillColor: color,
-        fillOpacity: 0.35,
-        weight: 2,
-        interactive: true,
-        bubblingMouseEvents: false,
-      });
-
-      const labelMarker = L.marker([h.lat, h.lng], {
-        pane: "labelPane",
-        interactive: false,
-        icon: L.divIcon({
-          className: "",
-          html: `<div style="display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;opacity:0.9"></span><span style="color:#e2e8f0;font-size:11px;font-weight:600;text-shadow:0 0 4px #000,0 0 8px #000,1px 1px 2px #000">${h.title}</span></div>`,
-          iconAnchor: [60, -12],
-        }),
-      });
-
-      const badge = rankBadge(h.id, HOTSPOTS);
-      const speciesTags = h.species
-        .map(
-          (s) =>
-            `<span style="background:rgba(6,182,212,0.2);color:#67e8f9;border-radius:999px;padding:1px 7px;font-size:10px;margin-right:3px">${s}</span>`,
-        )
-        .join("");
-      const confColor = confidenceColor(h.confidence);
-      const breakVal =
-        h.breakDelta > 0
-          ? `🔥 +${h.breakDelta}°F break`
-          : `<span style="color:#94a3b8">no break detected</span>`;
-      const sig = h.signals;
-      const signalRows = [
-        {
-          label: "SST proximity",
-          val: sig.sstScore,
-          max: 25,
-          color: "#fb923c",
-        },
-        {
-          label: "Break sharpness",
-          val: sig.sstBreakScore,
-          max: 25,
-          color: "#fbbf24",
-        },
-        {
-          label: "Chlorophyll",
-          val: sig.chloroScore,
-          max: 20,
-          color: "#4ade80",
-        },
-        {
-          label: "Altimetry/SSH",
-          val: sig.altimetryScore,
-          max: 15,
-          color: "#818cf8",
-        },
-        {
-          label: "History/Reports",
-          val: sig.historyReportsScore,
-          max: 15,
-          color: "#67e8f9",
-        },
-      ]
-        .map(
-          (r) =>
-            `<div style="display:flex;align-items:center;gap:4px;margin-bottom:2px">
-              <span style="font-size:9px;color:#94a3b8;width:88px;flex-shrink:0">${r.label}</span>
-              <div style="flex:1;background:#1e293b;border-radius:3px;height:5px;overflow:hidden">
-                <div style="background:${r.color};width:${Math.round((r.val / r.max) * 100)}%;height:100%;border-radius:3px"></div>
-              </div>
-              <span style="font-size:9px;color:${r.color};width:24px;text-align:right;flex-shrink:0">${r.val}/${r.max}</span>
-            </div>`,
-        )
-        .join("");
-      circle.bindPopup(
-        `<div style="color:#cbd5e1;font-size:12px;min-width:210px">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;flex-wrap:wrap">
-            <span style="color:${color};font-weight:700;font-size:13px">${h.title}</span>
-            ${badge}
-          </div>
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-            <span style="color:${confColor};font-size:18px;font-weight:800;line-height:1">${h.confidence}%</span>
-            <span style="color:#94a3b8;font-size:10px">confidence</span>
-          </div>
-          <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${h.sstTemp}°F</strong> &nbsp;&nbsp;${breakVal}</div>
-          <div style="margin-bottom:4px">${signalRows}</div>
-          <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
-          <div style="margin-bottom:4px">${speciesTags}</div>
-          <div style="color:#475569;font-size:10px;border-top:1px solid #1e293b;padding-top:4px;margin-top:2px">
-            Score = SST(25) + Break(25) + Chloro(20) + SSH(15) + History(15) · ERDDAP ACSPO/MUR
-          </div>
-        </div>`,
-        { className: "fishing-map-popup" },
-      );
-
-      circle.addTo(map);
-      labelMarker.addTo(map);
-
-      (circle as any)._labelMarker = labelMarker;
-    });
-
-    map.on("click", async (e: L.LeafletMouseEvent) => {
-      const { lat, lng } = e.latlng;
-      const td = toLoranTD(lat, lng);
-      const wpId = Math.random().toString(36).slice(2, 9);
-
-      const popup = L.popup({ className: "fishing-map-popup" })
-        .setLatLng(e.latlng)
-        .setContent(renderPopup(lat, lng, td, "fetching…", wpId))
-        .openOn(map);
-
-      const wireSave = () => {
-        const btn = document.getElementById(`wp-save-${wpId}`);
-        if (!btn) return;
-        btn.addEventListener("click", async () => {
-          const input = document.getElementById(
-            `wp-name-${wpId}`,
-          ) as HTMLInputElement | null;
-          const name =
-            input?.value.trim() ||
-            `Waypoint ${waypointsRef.current.length + 1}`;
-          await addWaypointRef.current(name, lat, lng, td.w, td.x);
-          popup.close();
-        });
-      };
-      popup.on("add", wireSave);
-
-      const bbox = clickBBox(lat, lng);
-      const result = await getSSTBBoxCached(bbox);
-      if (!map.hasLayer(popup)) return;
-
-      let sstText: string;
-      let meta: string | undefined;
-      if (result.ok) {
-        sstText = `${result.fahrenheit.toFixed(1)}°F (${result.celsius.toFixed(1)}°C)`;
-        meta = `${result.dataset} · ${result.resolution} · ${result.pixelCount}px avg`;
-      } else {
-        sstText = sstFallbackLabel(result.reason);
-      }
-      popup.setContent(renderPopup(lat, lng, td, sstText, wpId, meta));
-      wireSave();
-    });
-
-    mapRef.current = map;
-
-    return () => {
-      if (animIntervalRef.current) clearInterval(animIntervalRef.current);
-      map.remove();
-      mapRef.current = null;
-      sstLayersRef.current = [null, null, null, null];
-      bathyBaseRef.current = null;
-      bathyOverlayRef.current = null;
-    };
-  }, []); // empty deps — map never reinitializes; addWaypointRef stays current via its own effect
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    sstLayersRef.current.forEach((layer, idx) => {
-      if (!layer) return;
-      if (showSST && idx === sstOffset) layer.addTo(map);
-      else layer.remove();
-    });
-  }, [showSST]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !showSST) return;
-    sstLayersRef.current.forEach((layer, idx) => {
-      if (!layer) return;
-      if (idx === sstOffset) layer.addTo(map);
-      else layer.remove();
-    });
-  }, [sstOffset, showSST]);
-
-  // Start/stop the animation loop using setInterval held in a ref.
-  // This is intentionally NOT cleaned up by React — the interval lives as long as
-  // isAnimating is true, and is only cleared when the user stops or unmounts.
+  // Animation loop
   useEffect(() => {
     if (isAnimating) {
       if (animIntervalRef.current) clearInterval(animIntervalRef.current);
@@ -478,42 +85,22 @@ export default function TacticalMap() {
     };
   }, [isAnimating]);
 
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    const base = bathyBaseRef.current;
-    const overlay = bathyOverlayRef.current;
-    if (!base || !overlay) return;
-    if (showBathy) {
-      base.addTo(map);
-      overlay.addTo(map);
-    } else {
-      base.remove();
-      overlay.remove();
-    }
-  }, [showBathy]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    map.eachLayer((layer) => {
-      if (layer instanceof L.CircleMarker) {
-        const lm = (layer as any)._labelMarker as L.Marker | undefined;
-        if (showHotspots) {
-          if (!map.hasLayer(layer)) layer.addTo(map);
-          if (lm && !map.hasLayer(lm)) lm.addTo(map);
-        } else {
-          if (map.hasLayer(layer)) layer.remove();
-          if (lm && map.hasLayer(lm)) lm.remove();
-        }
-      }
-    });
-  }, [showHotspots]);
-
   return (
     <div className="h-[calc(100vh-8rem)] relative">
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* ── Shared map ─────────────────────────────────────────────────── */}
+      <FishingMap
+        mode="full"
+        hotspotDefs={activeHotspotDefs}
+        showSST={showSST}
+        sstOffset={sstOffset}
+        showBathy={showBathy}
+        showHotspots={showHotspots}
+        onSaveWaypoint={handleSaveWaypoint}
+        flyTo={flyTo}
+        className="absolute inset-0"
+      />
 
+      {/* ── Waypoints panel ────────────────────────────────────────────── */}
       {showWaypoints && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1200] w-[min(340px,calc(100vw-24px))] bg-slate-900/97 border border-cyan-700 rounded-xl shadow-2xl flex flex-col max-h-[70vh]">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
@@ -558,9 +145,7 @@ export default function TacticalMap() {
                   <div className="flex flex-col gap-1 shrink-0">
                     <button
                       onClick={() => {
-                        mapRef.current?.flyTo([wp.lat, wp.lng], 10, {
-                          duration: 1.2,
-                        });
+                        setFlyTo({ lat: wp.lat, lng: wp.lng, zoom: 10 });
                         setShowWaypoints(false);
                       }}
                       className="text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-300 rounded px-2 py-1"
@@ -582,6 +167,7 @@ export default function TacticalMap() {
         </div>
       )}
 
+      {/* ── SST History panel ──────────────────────────────────────────── */}
       <div className="absolute bottom-4 left-3 z-[1000] bg-slate-900/95 border border-slate-600 rounded-lg px-2 py-1.5 flex flex-col items-center gap-1 w-[min(230px,calc(100vw-80px))]">
         <div className="flex items-center gap-1.5 w-full">
           <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
@@ -622,6 +208,7 @@ export default function TacticalMap() {
         </div>
       </div>
 
+      {/* ── Right-side toolbar ────────────────────────────────────────── */}
       <div className="absolute top-3 right-3 z-[1100] flex flex-col gap-2">
         <button
           onClick={() => setShowSST(!showSST)}
@@ -645,7 +232,17 @@ export default function TacticalMap() {
           <Target className="w-5 h-5" />
         </button>
         <button
-          onClick={() => mapRef.current?.locate({ setView: true, maxZoom: 10 })}
+          onClick={() => {
+            if (navigator.geolocation) {
+              navigator.geolocation.getCurrentPosition((pos) => {
+                setFlyTo({
+                  lat: pos.coords.latitude,
+                  lng: pos.coords.longitude,
+                  zoom: 10,
+                });
+              });
+            }
+          }}
           className="p-2 rounded-lg bg-slate-800/90 border border-slate-600 text-slate-300 hover:bg-slate-700 transition-all"
           title="Go to my location"
         >
@@ -665,6 +262,7 @@ export default function TacticalMap() {
         </button>
       </div>
 
+      {/* ── Legend ───────────────────────────────────────────────────────── */}
       <div className="absolute top-3 left-3 z-[1000] bg-slate-800/90 rounded-lg p-2 border border-slate-700 space-y-1">
         <div className="text-xs font-semibold text-slate-300 mb-1">
           Hotspots
@@ -684,17 +282,15 @@ export default function TacticalMap() {
         ))}
       </div>
 
+      {/* ── SST tap-for-temp key ─────────────────────────────────────────── */}
       <div className="absolute bottom-3 right-3 z-[1000] bg-slate-900/85 rounded px-1.5 py-1 border border-slate-700/60">
         <div className="text-[9px] text-slate-400 mb-0.5 leading-none">
           tap map for temp
         </div>
         <div className="flex items-center gap-0.5">
-          <span className="text-[8px] text-blue-400">60°</span>
+          <span className="text-[8px] text-blue-400">60&#176;</span>
           <div className="w-16 h-1.5 rounded bg-gradient-to-r from-blue-500 via-yellow-400 to-red-500" />
-          <span className="text-[8px] text-red-400">85°F</span>
-        </div>
-        <div className="text-[8px] text-slate-600 mt-0.5 leading-none">
-          ERDDAP bbox · {gibsSSTLabel(sstOffset)}
+          <span className="text-[8px] text-red-400">85&#176;</span>
         </div>
       </div>
     </div>

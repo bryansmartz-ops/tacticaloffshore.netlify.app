@@ -18,6 +18,19 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (Fix: TacticalMap syntax error — FishingMap source appended after closing brace x2)
+- Root cause: repeated write_to_file concatenation bug — FishingMap.tsx content appended after TacticalMap&#39;s `}` on two separate responses
+- Fix: used write_to_file with TacticalMap-only content (247 lines); FishingMap.tsx unchanged
+- `src/sections/TacticalMap/index.tsx` now ends cleanly after `TacticalMap()` return; no duplicate exports
+- Removed stale unused `MapClickInfo` type import (was only needed by the appended FishingMap block)
+
+## 2026-05-30 (Plan COMPLETE — Steps 1+2+3: Shared FishingMap, live SST, both sections unified)
+- Created `src/components/FishingMap.tsx`: shared Leaflet component used by both TacticalMap and Hotspots
+- `FishingMap` owns all ERDDAP SST fetches; ambient refs flipped to inshore/shelf side (0.75° west) — fixes breakDelta=0 bug
+- Click-to-query popup opens synchronously with "fetching…" then updates in-place — fixes popup race condition
+- `Hotspots/index.tsx` fully rewritten: inline Leaflet removed, uses `<FishingMap mode="preview">` + `onHotspotsResolved` for live card data; signal bucket mini-bars added to cards
+- `TacticalMap/index.tsx` truncated SST gradient div repaired
+
 ## 2026-05-30 (Step 3/4 COMPLETE — Wire both sections to HOTSPOTS_IN_RANGE)
 - `TacticalMap/index.tsx`: imports `HOTSPOTS_IN_RANGE`; `buildDisplay()` now uses it (falls back to full list if empty)
 - `Hotspots/index.tsx`: map marker loop changed from `HOTSPOT_DEFS.forEach` → `activeHotspots.forEach`; card list changed from `HOTSPOT_DEFS.map` → `activeHotspots.map`
