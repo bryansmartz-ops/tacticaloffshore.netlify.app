@@ -18,6 +18,19 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (Multi-factor hotspot scoring — Step 1/3: Schema in src/lib/hotspots.ts)
+- Added `HotspotSignals` interface: 5 buckets (sstScore/25, sstBreakScore/25, chloroScore/20, altimetryScore/15, historyReportsScore/15, max 100)
+- Added `EMPTY_SIGNALS`, `computeSSTSignals()`, `computeChloroScore()`, `computeAltimetryScore()` helpers with inline scoring rules
+- `computeConfidence()` overloaded: new path sums all 5 buckets; legacy `(tempF, breakDelta)` path preserved — zero callsite breakage
+- `HotspotDef` gains `idealSstF`, `historyPrior`, and optional `signals?: HotspotSignals` for UI tooltip display
+- All 8 `HOTSPOT_DEFS` annotated with `idealSstF` + `historyPrior` values (Spencer Canyon=14, Diamond Shoals=15 — reflects current intel)
+
+## 2026-05-30 (TacticalMap — richer hotspot popups with PRIMARY/SECONDARY ranking)
+- Added `rankBadge()` helper: sorts HOTSPOTS by confidence desc; top-2 get green PRIMARY / blue SECONDARY badges
+- Hotspot circle popups now show: confidence % (large, color-coded), SST°F, break delta, LORAN TDs, species chips
+- Footer note in popup documents the scoring formula (Base 50 + SST score + ΔT score, ERDDAP sources)
+- Only `src/sections/TacticalMap/index.tsx` changed
+
 ## 2026-05-30 (TacticalMap Housekeeping Steps 2 & 3 — SST key + hotspot labels)
 - SST tap-for-temp key: shrunk to `text-[9px]`/`text-[8px]`, gradient bar `w-16 h-1.5`, moved to `bottom-3 right-3` to avoid overlap with History dialog
 - Hotspot divIcon labels: removed `background`/`border` box; replaced with a `7px` colored circle dot + plain shadowed text — matches hotspot color, no box

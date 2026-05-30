@@ -24,9 +24,10 @@ import {
   computeConfidence,
   confidenceColor,
   hotspotBBox,
+  buildHotspotSignals,
   HOTSPOT_DEFS,
 } from "../../lib/hotspots";
-import type { HotspotDef } from "../../lib/hotspots";
+import type { HotspotDef, HotspotSignals } from "../../lib/hotspots";
 
 // Per-hotspot computed prediction state
 interface HotspotPrediction {
@@ -37,20 +38,26 @@ interface HotspotPrediction {
   confidence: number;
   breakDelta: number;
   species: string[];
+  /** five-bucket signal breakdown for display in detail cards */
+  signals: HotspotSignals;
 }
 
 type HotspotPredictions = Record<string, HotspotPrediction>;
 
-function staticPrediction(h: Hotspot): HotspotPrediction {
+function staticPrediction(h: HotspotDef): HotspotPrediction {
   // Fallback values derived from the static SST so UI is never empty
-  const breakDelta = parseFloat(((h.fallbackSstF - 68) * 0.18).toFixed(1));
+  const breakDelta = parseFloat(
+    Math.max(0, (h.fallbackSstF - 68) * 0.18).toFixed(1),
+  );
+  const signals = buildHotspotSignals(h.fallbackSstF, breakDelta, h);
   return {
     sstResult: null,
     ambientResult: null,
     loading: false,
-    confidence: computeConfidence(h.fallbackSstF, breakDelta),
-    breakDelta: Math.max(0, breakDelta),
+    confidence: computeConfidence(signals),
+    breakDelta,
     species: speciesFromSST(h.fallbackSstF),
+    signals,
   };
 }
 
@@ -218,7 +225,8 @@ export default function Hotspots() {
         const hotF = hotResult.ok ? hotResult.fahrenheit : h.fallbackSstF;
         const ambF = ambResult.ok ? ambResult.fahrenheit : hotF - 2.0;
         const breakDelta = parseFloat(Math.max(0, hotF - ambF).toFixed(1));
-        const confidence = computeConfidence(hotF, breakDelta);
+        const signals = buildHotspotSignals(hotF, breakDelta, h);
+        const confidence = computeConfidence(signals);
         const species = speciesFromSST(hotF);
 
         setPredictions((prev) => ({
@@ -230,6 +238,7 @@ export default function Hotspots() {
             confidence,
             breakDelta,
             species,
+            signals,
           },
         }));
       });

@@ -76,6 +76,17 @@ function buildDisplay(defs: HotspotDef[]): HotspotDisplay[] {
 
 const HOTSPOTS: HotspotDisplay[] = buildDisplay(HOTSPOT_DEFS);
 
+/** Sort hotspots by confidence descending and assign a rank badge */
+function rankBadge(id: string, hotspots: HotspotDisplay[]): string {
+  const sorted = [...hotspots].sort((a, b) => b.confidence - a.confidence);
+  const rank = sorted.findIndex((h) => h.id === id);
+  if (rank === 0)
+    return `<span style="background:#16a34a;color:#fff;font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;letter-spacing:0.05em;vertical-align:middle">PRIMARY</span>`;
+  if (rank === 1)
+    return `<span style="background:#1d4ed8;color:#fff;font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;letter-spacing:0.05em;vertical-align:middle">SECONDARY</span>`;
+  return "";
+}
+
 const BATHY_BASE_TILE =
   "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}";
 const BATHY_OVERLAY_TILE =
@@ -271,13 +282,34 @@ export default function TacticalMap() {
         }),
       });
 
+      const badge = rankBadge(h.id, HOTSPOTS);
+      const speciesTags = h.species
+        .map(
+          (s) =>
+            `<span style="background:rgba(6,182,212,0.2);color:#67e8f9;border-radius:999px;padding:1px 7px;font-size:10px;margin-right:3px">${s}</span>`,
+        )
+        .join("");
+      const confColor = confidenceColor(h.confidence);
+      const breakVal =
+        h.breakDelta > 0
+          ? `🔥 +${h.breakDelta}°F break`
+          : `<span style="color:#94a3b8">no break detected</span>`;
       circle.bindPopup(
-        `<div style="color:#cbd5e1;font-size:12px;min-width:170px">
-          <div style="color:${color};font-weight:600;margin-bottom:4px">${h.title}</div>
-          <div style="margin-bottom:2px">🌡 ${h.sstTemp}°F &nbsp;🔥 +${h.breakDelta}°F break</div>
-          <div style="color:#a78bfa;font-size:11px;margin-bottom:4px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
-          <div>${h.species.map((s) => `<span style="background:rgba(6,182,212,0.2);color:#67e8f9;border-radius:999px;padding:1px 7px;font-size:10px;margin-right:3px">${s}</span>`).join("")}</div>
-          <div style="color:#64748b;font-size:10px;margin-top:4px">Confidence: ${h.confidence}%</div>
+        `<div style="color:#cbd5e1;font-size:12px;min-width:200px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;flex-wrap:wrap">
+            <span style="color:${color};font-weight:700;font-size:13px">${h.title}</span>
+            ${badge}
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+            <span style="color:${confColor};font-size:18px;font-weight:800;line-height:1">${h.confidence}%</span>
+            <span style="color:#94a3b8;font-size:10px">confidence</span>
+          </div>
+          <div style="margin-bottom:3px">🌡 <strong style="color:#fb923c">${h.sstTemp}°F</strong> &nbsp;&nbsp;${breakVal}</div>
+          <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
+          <div style="margin-bottom:4px">${speciesTags}</div>
+          <div style="color:#475569;font-size:10px;border-top:1px solid #1e293b;padding-top:4px;margin-top:2px">
+            SST: ERDDAP ACSPO L3S 0.02° / MUR NRT 0.01° · Break: hotspot − shelf ambient · Base 50 + SST score + ΔT score
+          </div>
         </div>`,
         { className: "fishing-map-popup" },
       );
