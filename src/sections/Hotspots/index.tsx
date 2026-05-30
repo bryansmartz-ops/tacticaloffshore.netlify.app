@@ -52,10 +52,13 @@ export default function Hotspots() {
   const handleHotspotClick = useCallback(
     (id: string) => {
       setSelectedId((prev) => (prev === id ? null : id));
-      const h = activeHotspotDefs.find((x) => x.id === id);
+      // dynamic hotspot ids start with "dyn-", find in liveHotspots instead
+      const h =
+        activeHotspotDefs.find((x) => x.id === id) ??
+        liveHotspots.find((x) => x.id === id);
       if (h) setFlyTo({ lat: h.lat, lng: h.lng, zoom: 9 });
     },
-    [activeHotspotDefs],
+    [activeHotspotDefs, liveHotspots],
   );
 
   // Whether fetches have all completed (loadingIds empty after first resolution)
@@ -63,10 +66,10 @@ export default function Hotspots() {
   // allSatelliteUnavailable is true when fetches are done but resolved to empty list
   const allSatelliteUnavailable = fetchesDone && liveHotspots.length === 0;
 
-  // Show spinner placeholders while fetching; once done show only live entries.
-  // If all failed, displayHotspots stays empty (handled via empty-state UI below).
+  // Show spinner placeholders while fetching; once done show live + dynamic entries.
+  // Sorted by confidence descending so PRIMARY / SECONDARY are always at top.
   const displayHotspots: HotspotDisplay[] = fetchesDone
-    ? liveHotspots // already filtered to live-only by FishingMap
+    ? [...liveHotspots].sort((a, b) => b.confidence - a.confidence)
     : activeHotspotDefs.map((h) => ({
         id: h.id,
         title: h.title,
@@ -201,7 +204,14 @@ export default function Hotspots() {
             >
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="font-semibold text-white">{h.title}</h3>
+                  <h3 className="font-semibold text-white flex items-center gap-2">
+                    {h.title}
+                    {h.isDynamic && (
+                      <span className="text-[9px] font-bold bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded uppercase tracking-wide">
+                        DYNAMIC
+                      </span>
+                    )}
+                  </h3>
                   <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
                     <MapPin className="w-3 h-3" />
                     {h.lat.toFixed(2)}&#176;N, {Math.abs(h.lng).toFixed(2)}
@@ -342,10 +352,13 @@ export default function Hotspots() {
                 </div>
               )}
 
-              {def && !isLoading && (
+              {!isLoading && (
                 <div className="text-[10px] text-slate-600 mt-0.5">
-                  {def.idealSstF}&#176;F ideal · {def.historyPrior}/15 history
-                  score
+                  {h.isDynamic
+                    ? `Dynamic break detected offshore · ${h.anchorTitle ?? ""}`
+                    : def
+                      ? `${def.idealSstF}&#176;F ideal · ${def.historyPrior}/15 history score`
+                      : ""}
                 </div>
               )}
             </div>

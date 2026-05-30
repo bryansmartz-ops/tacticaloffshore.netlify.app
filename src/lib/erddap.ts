@@ -18,6 +18,12 @@
  *   prefetchSSTBatch(coords)    → void
  *   getCacheAge()               → number | null
  *   formatSST(result, fallback) → { text, live }
+ *   getLastValidSST(key)        → { fahrenheit, celsius, fetchedAt } | null
+ *
+ * Cache behaviour (v3 → v4 change):
+ *   - ok:false results are NEVER written to the cache so the next call always retries live
+ *   - A separate localStorage key (sst_last_valid_v1) stores only ok:true results
+ *     keyed identically to the main cache — survives page reloads and TTL expiry
  *   gibsSSTDate / gibsSSTTileUrl / gibsSSTLabel  (GIBS tile helpers)
  */
 
@@ -118,11 +124,18 @@ export async function fetchSSTBBox(bbox: BBoxQuery): Promise<SSTResult> {
     }
 
     const reason = proxy.reason as "timeout" | "land" | "error";
+    console.warn(
+      `[erddap] fetchSSTBBox failed — reason: ${reason} | bbox: ${bbox.minLat},${bbox.maxLat},${bbox.minLng},${bbox.maxLng}`,
+    );
     return { ok: false, reason: reason === "land" ? "land" : "error" };
   } catch (err) {
     clearTimeout(timer);
     const isAbort = err instanceof Error && err.name === "AbortError";
-    return { ok: false, reason: isAbort ? "timeout" : "error" };
+    const reason = isAbort ? "timeout" : "error";
+    console.warn(
+      `[erddap] fetchSSTBBox exception — reason: ${reason} | bbox: ${bbox.minLat},${bbox.maxLat},${bbox.minLng},${bbox.maxLng} | err: ${err}`,
+    );
+    return { ok: false, reason };
   }
 }
 
@@ -153,11 +166,18 @@ export async function fetchSSTfromERDDAP(
     }
 
     const reason = proxy.reason as "timeout" | "land" | "error";
+    console.warn(
+      `[erddap] fetchSSTfromERDDAP failed — reason: ${reason} | lat: ${lat}, lng: ${lng}`,
+    );
     return { ok: false, reason: reason === "land" ? "land" : "error" };
   } catch (err) {
     clearTimeout(timer);
     const isAbort = err instanceof Error && err.name === "AbortError";
-    return { ok: false, reason: isAbort ? "timeout" : "error" };
+    const reason = isAbort ? "timeout" : "error";
+    console.warn(
+      `[erddap] fetchSSTfromERDDAP exception — reason: ${reason} | lat: ${lat}, lng: ${lng} | err: ${err}`,
+    );
+    return { ok: false, reason };
   }
 }
 
@@ -172,6 +192,7 @@ export function formatSST(
 }
 
 const CACHE_VERSION = "sst_cache_v2";
+const LAST_VALID_VERSION = "sst_last_valid_v1";
 const CACHE_TTL_MS = 60 * 60 * 1000;
 
 interface CacheEntry {
@@ -201,6 +222,64 @@ function loadStore(): SSTCacheStore {
   return { batchFetchedAt: new Date(0).toISOString(), entries: {} };
 }
 
+// ─── Last-valid SST persistence ────────────────────────────────────────────
+
+export interface LastValidSST {
+  fahrenheit: number;
+  celsius: number;
+  fetchedAt: string; // ISO string
+}
+
+function loadLastValidStore(): Record<string, LastValidSST> {
+  try {
+    const raw = localStorage.getItem(LAST_VALID_VERSION);
+    if (raw) return JSON.parse(raw) as Record<string, LastValidSST>;
+  } catch {}
+  return {};
+}
+
+function saveLastValidStore(store: Record<string, LastValidSST>): void {
+  try {
+    localStorage.setItem(LAST_VALID_VERSION, JSON.stringify(store));
+  } catch {}
+}
+
+function persistLastValid(key: string, result: SSTResult & { ok: true }): void {
+  const store = loadLastValidStore();
+  store[key] = {
+    fahrenheit: result.fahrenheit,
+    celsius: result.celsius,
+    fetchedAt: new Date().toISOString(),
+  };
+  saveLastValidStore(store);
+}
+
+/**
+ * Returns the most recent ok:true SST reading for this cache key,
+ * regardless of TTL — or null if no successful read has ever been stored.
+ */
+export function getLastValidSST(key: string): LastValidSST | null {
+  const store = loadLastValidStore();
+  return store[key] ?? null;
+}
+
+/**
+ * Convenience: look up last-valid by bbox (same key format as cache).
+ */
+export function getLastValidSSTBBox(bbox: BBoxQuery): LastValidSST | null {
+  return getLastValidSST(bboxCacheKey(bbox));
+}
+
+/**
+ * Convenience: look up last-valid by lat/lng point (same key format as cache).
+ */
+export function getLastValidSSTPoint(
+  lat: number,
+  lng: number,
+): LastValidSST | null {
+  return getLastValidSST(pointCacheKey(lat, lng));
+}
+
 function saveStore(store: SSTCacheStore): void {
   try {
     localStorage.setItem(CACHE_VERSION, JSON.stringify(store));
@@ -225,14 +304,23 @@ export async function getSSTCached(
 
   if (entry) {
     const age = Date.now() - new Date(entry.fetchedAt).getTime();
-    if (age < CACHE_TTL_MS) return entry.result;
+    if (age < CACHE_TTL_MS && entry.result.ok) return entry.result;
   }
 
   const result = await fetchSSTfromERDDAP(lat, lng);
 
-  store.entries[key] = { result, fetchedAt: new Date().toISOString() };
-  if (updateBatchTimestamp) store.batchFetchedAt = new Date().toISOString();
-  saveStore(store);
+  if (result.ok) {
+    // Only cache successes — failures should always retry live on next call
+    store.entries[key] = { result, fetchedAt: new Date().toISOString() };
+    if (updateBatchTimestamp) store.batchFetchedAt = new Date().toISOString();
+    saveStore(store);
+    persistLastValid(key, result);
+  } else {
+    console.warn(
+      `[erddap] getSSTCached: skipping cache write for failed result at key="${key}"`,
+    );
+  }
+
   return result;
 }
 
@@ -246,14 +334,39 @@ export async function getSSTBBoxCached(
 
   if (entry) {
     const age = Date.now() - new Date(entry.fetchedAt).getTime();
-    if (age < CACHE_TTL_MS) return entry.result;
+    if (age < CACHE_TTL_MS && entry.result.ok) return entry.result;
   }
 
   const result = await fetchSSTBBox(bbox);
 
-  store.entries[key] = { result, fetchedAt: new Date().toISOString() };
-  if (updateBatchTimestamp) store.batchFetchedAt = new Date().toISOString();
-  saveStore(store);
+  if (result.ok) {
+    // Only cache successes — failures should always retry live on next call
+    store.entries[key] = { result, fetchedAt: new Date().toISOString() };
+    if (updateBatchTimestamp) store.batchFetchedAt = new Date().toISOString();
+    saveStore(store);
+    persistLastValid(key, result);
+    return result;
+  }
+
+  // ERDDAP failed — try last-valid persisted reading before giving up
+  const lastValid = getLastValidSST(key);
+  if (lastValid) {
+    console.warn(
+      `[erddap] getSSTBBoxCached: ERDDAP failed for key="${key}", returning last-valid SST ${lastValid.fahrenheit.toFixed(1)}°F from ${lastValid.fetchedAt}`,
+    );
+    return {
+      ok: true,
+      celsius: lastValid.celsius,
+      fahrenheit: lastValid.fahrenheit,
+      pixelCount: 0,
+      dataset: "last-valid",
+      resolution: "0.02deg",
+    };
+  }
+
+  console.warn(
+    `[erddap] getSSTBBoxCached: skipping cache write for failed result at key="${key}" — no last-valid available`,
+  );
   return result;
 }
 

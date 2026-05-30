@@ -18,6 +18,19 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (Hotspot label format: Name • SST • Confidence%)
+- `buildLabelIcon()` now receives full `HotspotDisplay` object instead of just title/color
+- Label format changed from "Hudson Canyon Rip" → "Hudson • 72°F • 85%" — live SST + confidence visible at a glance
+- `iconAnchor` widened 60→80 to accommodate the longer label string
+- Two `syncMarkers()` call sites updated to pass full hotspot object
+
+## 2026-05-30 (Plan Step 1/4 — erddap.ts: never cache failures + last-valid SST persistence)
+- `getSSTBBoxCached` / `getSSTCached`: cache write skipped entirely when `result.ok === false` — next call always retries live
+- Added `sst_last_valid_v1` localStorage store: `persistLastValid()` writes only on `ok:true`; survives TTL expiry and page reloads
+- Exported `getLastValidSST(key)`, `getLastValidSSTBBox(bbox)`, `getLastValidSSTPoint(lat,lng)` — Step 3 will wire these into FishingMap fallback UI
+- `fetchSSTBBox` + `fetchSSTfromERDDAP`: both now `console.warn` with reason + coords/bbox on any `ok:false` path or exception
+- Cache read guard tightened: stale `ok:false` entries already in localStorage are ignored (`entry.result.ok` check)
+
 ## 2026-05-30 (Fix: Leaflet DOM side-effects inside React state updater — runtime crash)
 - Root cause: `showNoBanner`, `hideNoBanner`, `onHotspotsResolved` were called inside `setLiveHotspots` updater; React StrictMode double-invokes updaters → Leaflet threw on second DOM mutation
 - Secondary bug: if two promises resolved in the same microtask tick, both updaters saw `loadingIds.current.size === 0` → `onHotspotsResolved` called twice

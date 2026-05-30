@@ -21,6 +21,7 @@ import { getSSTBBoxCached, gibsSSTTileUrl } from "../lib/erddap";
 import type { BBoxQuery } from "../lib/erddap";
 import {
   toLoranTD,
+  haversineNm,
   confidenceColor,
   hotspotBBox,
   HOTSPOT_BBOX_PAD,
@@ -46,6 +47,10 @@ export interface HotspotDisplay {
   signals: HotspotSignals;
   /** True when ERDDAP returned no valid pixel and fallbackSstF was used instead. */
   isFallbackSst: boolean;
+  /** True when this hotspot was detected dynamically (offshore break, not a fixed canyon). */
+  isDynamic?: boolean;
+  /** Name of the anchor canyon this dynamic hotspot was detected relative to. */
+  anchorTitle?: string;
 }
 
 export interface FishingMapProps {
@@ -91,6 +96,73 @@ export interface MapClickInfo {
   tdW: string;
   tdX: string;
   meta?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Bearing / cardinal helpers — used for dynamic break labels
+// ---------------------------------------------------------------------------
+
+function bearingDeg(
+  fromLat: number,
+  fromLng: number,
+  toLat: number,
+  toLng: number,
+): number {
+  const dLng = ((toLng - fromLng) * Math.PI) / 180;
+  const y = Math.sin(dLng) * Math.cos((toLat * Math.PI) / 180);
+  const x =
+    Math.cos((fromLat * Math.PI) / 180) * Math.sin((toLat * Math.PI) / 180) -
+    Math.sin((fromLat * Math.PI) / 180) *
+      Math.cos((toLat * Math.PI) / 180) *
+      Math.cos(dLng);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+function toCardinal(deg: number): string {
+  const dirs = [
+    "N",
+    "NNE",
+    "NE",
+    "ENE",
+    "E",
+    "ESE",
+    "SE",
+    "SSE",
+    "S",
+    "SSW",
+    "SW",
+    "WSW",
+    "W",
+    "WNW",
+    "NW",
+    "NNW",
+  ];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+/** Move a lat/lng point by distNM nautical miles on a given bearing (degrees). */
+function offsetPoint(
+  lat: number,
+  lng: number,
+  distNM: number,
+  brngDeg: number,
+): { lat: number; lng: number } {
+  const R = 3440.065;
+  const d = distNM / R;
+  const brng = (brngDeg * Math.PI) / 180;
+  const lat1 = (lat * Math.PI) / 180;
+  const lng1 = (lng * Math.PI) / 180;
+  const lat2 = Math.asin(
+    Math.sin(lat1) * Math.cos(d) +
+      Math.cos(lat1) * Math.sin(d) * Math.cos(brng),
+  );
+  const lng2 =
+    lng1 +
+    Math.atan2(
+      Math.sin(brng) * Math.sin(d) * Math.cos(lat1),
+      Math.cos(d) - Math.sin(lat1) * Math.sin(lat2),
+    );
+  return { lat: (lat2 * 180) / Math.PI, lng: (lng2 * 180) / Math.PI };
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +328,161 @@ function defToDisplay(h: HotspotDef): HotspotDisplay {
 }
 
 // ---------------------------------------------------------------------------
+// Dynamic offshore thermal-break scanner
+// ---------------------------------------------------------------------------
+/**
+ * After all fixed hotspot fetches resolve, scan 10 / 20 / 30 NM east of each
+ * cold-shelf canyon to find where the actual Gulf Stream thermal edge is.
+ *
+ * "Cold-shelf" = live SST is ≥6°F below the canyon&#39;s idealSstF (warm GS water
+ * has not pushed to the canyon head — it&#39;s somewhere offshore).
+ *
+ * All offshore probes are fired in parallel (max 25 s regardless of count).
+ * When a ΔT ≥ 3°F warm transition is found, a dynamic HotspotDisplay is
+ * created at the warm side of the break, labeled "14NM ENE of Baltimore Canyon".
+ * At most 3 dynamic markers are added, sorted by confidence descending.
+ */
+async function scanDynamicBreaks(
+  resolvedEntries: HotspotDisplay[],
+  defs: HotspotDef[],
+  addDynamic: (entries: HotspotDisplay[]) => void,
+): Promise<void> {
+  // Only scan canyons where shelf water is significantly colder than ideal
+  const coldEntries = resolvedEntries
+    .filter((e) => !e.isDynamic && !e.isFallbackSst)
+    .filter((e) => {
+      const def = defs.find((d) => d.id === e.id);
+      return def !== undefined && def.idealSstF - e.sstTemp >= 6;
+    })
+    .slice(0, 4); // cap at 4 hotspots to limit total probe count
+
+  if (coldEntries.length === 0) return;
+
+  // Build all probe specs upfront
+  type ProbeSpec = { entryId: string; dist: number; lat: number; lng: number };
+  const probeSpecs: ProbeSpec[] = [];
+  for (const entry of coldEntries) {
+    for (const dist of [10, 20, 30]) {
+      const pt = offsetPoint(entry.lat, entry.lng, dist, 90); // due east = offshore
+      probeSpecs.push({ entryId: entry.id, dist, lat: pt.lat, lng: pt.lng });
+    }
+  }
+
+  // Fire all probes in parallel — total wall-time = single ERDDAP timeout (25 s)
+  const results = await Promise.allSettled(
+    probeSpecs.map((spec) =>
+      getSSTBBoxCached(hotspotBBox(spec.lat, spec.lng, 0.15)),
+    ),
+  );
+
+  // Group results by entryId
+  type ScanPt = { dist: number; tempF: number; lat: number; lng: number };
+  const scanMap = new Map<string, ScanPt[]>();
+  probeSpecs.forEach((spec, i) => {
+    const res = results[i];
+    if (
+      res.status === "fulfilled" &&
+      res.value.ok &&
+      (res.value as { dataset?: string }).dataset !== "last-valid"
+    ) {
+      if (!scanMap.has(spec.entryId)) scanMap.set(spec.entryId, []);
+      scanMap.get(spec.entryId)!.push({
+        dist: spec.dist,
+        tempF: res.value.fahrenheit,
+        lat: spec.lat,
+        lng: spec.lng,
+      });
+    }
+  });
+
+  const candidates: HotspotDisplay[] = [];
+
+  for (const entry of coldEntries) {
+    const pts = (scanMap.get(entry.id) ?? []).sort((a, b) => a.dist - b.dist);
+    if (pts.length < 2) continue;
+
+    const def = defs.find((d) => d.id === entry.id)!;
+
+    // Find the sharpest warm-direction transition
+    let maxBreak = 0;
+    let breakIdx = -1;
+    for (let i = 1; i < pts.length; i++) {
+      const delta = pts[i].tempF - pts[i - 1].tempF;
+      if (delta > maxBreak) {
+        maxBreak = delta;
+        breakIdx = i;
+      }
+    }
+
+    if (maxBreak < 3 || breakIdx < 0) continue;
+    const warmPt = pts[breakIdx];
+
+    // Warm side must be in productive range AND closer to target temp
+    if (warmPt.tempF < 64 || warmPt.tempF > 86) continue;
+    if (warmPt.tempF < def.idealSstF - 8) continue;
+
+    // Must be >8 NM from any existing fixed or dynamic hotspot to avoid clutter
+    const allExisting = [...resolvedEntries, ...candidates];
+    if (
+      allExisting.some(
+        (e) => haversineNm(e.lat, e.lng, warmPt.lat, warmPt.lng) < 8,
+      )
+    )
+      continue;
+
+    const brng = bearingDeg(entry.lat, entry.lng, warmPt.lat, warmPt.lng);
+    const distNM = Math.round(
+      haversineNm(entry.lat, entry.lng, warmPt.lat, warmPt.lng),
+    );
+    const cardDir = toCardinal(brng);
+    const canyonShort = def.title.split(" ")[0];
+    const title = `${distNM}NM ${cardDir} of ${canyonShort} Canyon`;
+
+    const coldTempF = pts[breakIdx - 1].tempF;
+    const breakDelta = parseFloat(
+      Math.max(0, warmPt.tempF - coldTempF).toFixed(1),
+    );
+
+    const dynDef: HotspotDef = {
+      ...def,
+      id: `dyn-${def.id}-${distNM}`,
+      title,
+      lat: warmPt.lat,
+      lng: warmPt.lng,
+      fallbackSstF: warmPt.tempF,
+      idealSstF: def.idealSstF,
+      ambientLat: entry.lat,
+      ambientLng: entry.lng,
+      historyPrior: Math.max(5, def.historyPrior - 4),
+    };
+
+    const signals = buildHotspotSignals(warmPt.tempF, breakDelta, dynDef);
+    const confidence = computeConfidence(signals);
+
+    candidates.push({
+      id: dynDef.id,
+      title,
+      confidence,
+      sstTemp: warmPt.tempF,
+      breakDelta,
+      lat: warmPt.lat,
+      lng: warmPt.lng,
+      species: speciesFromSST(warmPt.tempF),
+      signals,
+      isFallbackSst: false,
+      isDynamic: true,
+      anchorTitle: def.title,
+    });
+  }
+
+  if (candidates.length > 0) {
+    addDynamic(
+      candidates.sort((a, b) => b.confidence - a.confidence).slice(0, 3),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -359,7 +586,7 @@ export default function FishingMap({
         const display: HotspotDisplay = {
           id: h.id,
           title: h.title,
-          confidence: rawConf, // no penalty; fallback entries are excluded entirely
+          confidence: rawConf,
           sstTemp: hotF,
           breakDelta,
           lat: h.lat,
@@ -371,20 +598,24 @@ export default function FishingMap({
 
         loadingIds.current.delete(h.id);
 
+        // ── PURE state update — no DOM ops, no callbacks inside the updater ──
         setLiveHotspots((prev) => {
           const next = prev.map((existing) =>
             existing.id === h.id ? display : existing,
           );
           liveHotspotsRef.current = next;
+          return next;
+        });
 
-          // ── When ALL fetches complete: apply exclusion logic ─────────────
-          if (loadingIds.current.size === 0) {
+        // ── Side-effects deferred to after React commits ──────────────────
+        if (loadingIds.current.size === 0) {
+          setTimeout(() => {
+            const next = liveHotspotsRef.current;
             const liveEntries = next.filter((e) => !e.isFallbackSst);
             const allFallback = liveEntries.length === 0;
             const map = mapRef.current;
 
             if (allFallback) {
-              // Every ERDDAP fetch failed — clear markers, show banner
               if (map) {
                 circleMarkersRef.current.forEach((m) => m.remove());
                 circleMarkersRef.current.clear();
@@ -394,10 +625,8 @@ export default function FishingMap({
               }
               onHotspotsResolved?.([]);
             } else {
-              // At least some live SST succeeded — show ONLY live entries
               hideNoBanner();
               if (map) {
-                // Remove markers for fallback-only entries
                 next
                   .filter((e) => e.isFallbackSst)
                   .forEach((e) => {
@@ -407,11 +636,24 @@ export default function FishingMap({
                     labelMarkersRef.current.delete(e.id);
                   });
               }
+              // Notify parent with fixed-hotspot live entries
               onHotspotsResolved?.(liveEntries);
+
+              // Scan offshore for actual GS thermal edge (parallel, non-blocking)
+              scanDynamicBreaks(liveEntries, hotspotDefs, (dynEntries) => {
+                setLiveHotspots((prev) => {
+                  const next2 = [...prev, ...dynEntries];
+                  liveHotspotsRef.current = next2;
+                  return next2;
+                });
+                // Re-notify parent with dynamic entries appended
+                setTimeout(() => {
+                  onHotspotsResolved?.([...liveEntries, ...dynEntries]);
+                }, 0);
+              });
             }
-          }
-          return next;
-        });
+          }, 0);
+        }
       });
     });
   }, [hotspotDefs]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -633,10 +875,10 @@ export default function FishingMap({
         existing.setPopupContent(
           buildHotspotPopupHtml(h, visibleSpots, isLoading),
         );
-        // Update label color dot
+        // Update label with new SST/confidence
         const lbl = labelMarkersRef.current.get(h.id);
         if (lbl) {
-          lbl.setIcon(buildLabelIcon(h.title, color));
+          lbl.setIcon(buildLabelIcon(h, color));
         }
         return;
       }
@@ -670,18 +912,20 @@ export default function FishingMap({
       const labelMarker = L.marker([h.lat, h.lng], {
         pane: "labelPane",
         interactive: false,
-        icon: buildLabelIcon(h.title, color),
+        icon: buildLabelIcon(h, color),
       });
       labelMarker.addTo(map);
       labelMarkersRef.current.set(h.id, labelMarker);
     });
   }
 
-  function buildLabelIcon(title: string, color: string): L.DivIcon {
+  function buildLabelIcon(h: HotspotDisplay, color: string): L.DivIcon {
+    // Short name (first word only for canyon names like "Hudson Canyon Rip" → "Hudson")
+    const shortName = h.title.split(" ")[0];
     return L.divIcon({
       className: "",
-      html: `<div style="display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;opacity:0.9"></span><span style="color:#e2e8f0;font-size:11px;font-weight:600;text-shadow:0 0 4px #000,0 0 8px #000,1px 1px 2px #000">${title}</span></div>`,
-      iconAnchor: [60, -12],
+      html: `<div style="display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;opacity:0.9"></span><span style="color:#e2e8f0;font-size:11px;font-weight:600;text-shadow:0 0 4px #000,0 0 8px #000,1px 1px 2px #000">${shortName} • ${h.sstTemp.toFixed(0)}°F • ${h.confidence}%</span></div>`,
+      iconAnchor: [80, -12],
     });
   }
 
