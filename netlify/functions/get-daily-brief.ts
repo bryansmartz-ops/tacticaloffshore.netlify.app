@@ -67,7 +67,7 @@ interface NwsForecastResponse {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const NWS_ZONE_URL = "https://api.weather.gov/zones/forecast/ANZ655/forecast" as const;
+const NWS_POINTS_URL = "https://api.weather.gov/points/37.65,-74.80" as const;
 
 const ERDDAP_URL = [
   "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.json",
