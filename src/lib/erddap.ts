@@ -1,5 +1,5 @@
 /**
- * ERDDAP SST helper — v4 (proxy-routed)
+ * ERDDAP SST helper — v5 (proxy-routed + scanbreak support)
  *
  * All live SST fetches now go through the Netlify serverless proxy at
  *   /.netlify/functions/sst-proxy
@@ -10,17 +10,18 @@
  *   - ERDDAP URLs stay server-side
  *   - ACSPO primary / MUR fallback logic lives in one place (the proxy)
  *
- * Public API (unchanged from v3):
- *   fetchSSTBBox(bbox)          → SSTResult
- *   fetchSSTfromERDDAP(lat,lng) → SSTResult  (backwards compat point query)
- *   getSSTCached(lat,lng)       → SSTResult  (cached point)
- *   getSSTBBoxCached(bbox)      → SSTResult  (cached bbox)
- *   prefetchSSTBatch(coords)    → void
- *   getCacheAge()               → number | null
- *   formatSST(result, fallback) → { text, live }
- *   getLastValidSST(key)        → { fahrenheit, celsius, fetchedAt } | null
+ * Public API:
+ *   fetchSSTBBox(bbox)              → SSTResult
+ *   fetchSSTfromERDDAP(lat,lng)     → SSTResult  (backwards compat point query)
+ *   getSSTCached(lat,lng)           → SSTResult  (cached point)
+ *   getSSTBBoxCached(bbox)          → SSTResult  (cached bbox)
+ *   scanBreakInBbox(params)         → ScanBreakResult  ← NEW (Step 2)
+ *   prefetchSSTBatch(coords)        → void
+ *   getCacheAge()                   → number | null
+ *   formatSST(result, fallback)     → { text, live }
+ *   getLastValidSST(key)            → { fahrenheit, celsius, fetchedAt } | null
  *
- * Cache behaviour (v3 → v4 change):
+ * Cache behaviour (v4):
  *   - ok:false results are NEVER written to the cache so the next call always retries live
  *   - A separate localStorage key (sst_last_valid_v1) stores only ok:true results
  *     keyed identically to the main cache — survives page reloads and TTL expiry
@@ -33,6 +34,48 @@ export interface BBoxQuery {
   minLng: number;
   maxLng: number;
 }
+
+// ---------------------------------------------------------------------------
+// Scan-break result types  (Step 2 — grid-scan break-finder)
+// ---------------------------------------------------------------------------
+
+export interface ScanBreakParams {
+  /** Search region bounding box — from HotspotDef.searchBbox */
+  searchBbox: BBoxQuery;
+  /** Ambient shelf point — from HotspotDef.ambientLat / ambientLng */
+  ambLat: number;
+  ambLng: number;
+}
+
+/**
+ * Successful scan-break response: the cell with the sharpest hot/cold delta
+ * inside the search bbox.
+ *
+ * The caller (FishingMap Step 3) uses hotLat/hotLng as the plotted marker
+ * position, breakDeltaF to score confidence, and ambTempF as the "cold side"
+ * of the thermal front.
+ */
+export type ScanBreakResult =
+  | {
+      ok: true;
+      /** Latitude of the warmest break cell found */
+      hotLat: number;
+      /** Longitude of the warmest break cell found */
+      hotLng: number;
+      /** SST °F at the hot side of the break */
+      hotTempF: number;
+      /** SST °F at the ambient (cold-shelf) reference point */
+      ambTempF: number;
+      /** hotTempF − ambTempF in °F — the sharpness of the detected break */
+      breakDeltaF: number;
+      pixelCount: number;
+      dataset: string;
+      resolution: string;
+    }
+  | {
+      ok: false;
+      reason: "no_data" | "bad_params" | "timeout" | "error";
+    };
 
 export type SSTResult =
   | {
@@ -92,6 +135,63 @@ async function callProxy(
     return (await resp.json()) as ProxyResponse;
   } catch (err) {
     throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// scanBreakInBbox — client-side wrapper for mode=scanbreak proxy route
+// ---------------------------------------------------------------------------
+
+/**
+ * Calls the sst-proxy `mode=scanbreak` endpoint, which sweeps the given
+ * search bbox on a 0.25° grid, samples SST at each cell, and returns the
+ * cell with the largest (hotSST − ambSST) thermal break.
+ *
+ * Timeout is generous (45 s) because the server-side scan fires up to 12
+ * parallel ERDDAP requests that each have an 18 s server timeout.
+ *
+ * Results are NOT cached — every call hits the proxy live so the scan always
+ * reflects current satellite data.  Calling code (FishingMap Step 3) is
+ * responsible for not calling this more often than necessary.
+ */
+export async function scanBreakInBbox(
+  params: ScanBreakParams,
+): Promise<ScanBreakResult> {
+  const controller = new AbortController();
+  // Allow up to 45 s — server fires ≤12 parallel ERDDAP calls at 18 s each
+  const timer = setTimeout(() => controller.abort(), 45_000);
+
+  try {
+    const qs = new URLSearchParams({
+      mode: "scanbreak",
+      minLat: params.searchBbox.minLat.toString(),
+      maxLat: params.searchBbox.maxLat.toString(),
+      minLng: params.searchBbox.minLng.toString(),
+      maxLng: params.searchBbox.maxLng.toString(),
+      ambLat: params.ambLat.toString(),
+      ambLng: params.ambLng.toString(),
+    }).toString();
+
+    const resp = await fetch(`${PROXY_BASE}?${qs}`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!resp.ok) {
+      console.warn(`[erddap] scanBreakInBbox HTTP ${resp.status}`);
+      return { ok: false, reason: "error" };
+    }
+
+    const data = (await resp.json()) as ScanBreakResult;
+    return data;
+  } catch (err) {
+    clearTimeout(timer);
+    const isAbort = err instanceof Error && err.name === "AbortError";
+    const reason = isAbort ? "timeout" : "error";
+    console.warn(
+      `[erddap] scanBreakInBbox ${reason} | bbox: ${params.searchBbox.minLat}–${params.searchBbox.maxLat}, ${params.searchBbox.minLng}–${params.searchBbox.maxLng}`,
+    );
+    return { ok: false, reason };
   }
 }
 

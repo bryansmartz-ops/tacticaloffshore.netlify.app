@@ -465,43 +465,59 @@ export function distFromOCInlet(lat: number, lng: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Bbox helper
-// ---------------------------------------------------------------------------
-
-/** ±0.15° bounding box centred on a lat/lng — matches Hotspots bboxPad=0.15 */
-export const HOTSPOT_BBOX_PAD = 0.15;
-
-export function hotspotBBox(
-  lat: number,
-  lng: number,
-  pad = HOTSPOT_BBOX_PAD,
-): BBoxQuery {
-  return {
-    minLat: lat - pad,
-    maxLat: lat + pad,
-    minLng: lng - pad,
-    maxLng: lng + pad,
-  };
-}
-
-// ---------------------------------------------------------------------------
 // Canonical hotspot definitions
 // ---------------------------------------------------------------------------
+
+/**
+ * A search region bounding box used by the grid-scan break-finder.
+ * The scanner sweeps this box at 0.1° resolution, finds the cell with the
+ * sharpest thermal break, and only plots a hotspot marker if that cell's
+ * confidence score exceeds minConfidence.
+ *
+ * Size guidance: ~1.0°×1.0° is sufficient for most canyon systems; widen
+ * to ~1.2°×1.2° for highly mobile GS meander zones (e.g. Hatteras).
+ */
+export interface SearchBbox {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+}
 
 export interface HotspotDef {
   id: string;
   title: string;
   /** Fallback SST °F used when ERDDAP is unavailable */
   fallbackSstF: number;
+  /**
+   * Fallback/label-anchor latitude — where to pin a label if the grid scan
+   * finds no break above minConfidence.  Optional: the scan result coordinates
+   * are used when a live break IS found.
+   */
   lat: number;
+  /**
+   * Fallback/label-anchor longitude — see lat above.
+   */
   lng: number;
   /** Nearby ambient shelf point for computing breakDelta */
   ambientLat: number;
   ambientLng: number;
-  /** BBox half-width in degrees; defaults to HOTSPOT_BBOX_PAD */
-  bboxPad?: number;
   /**
-   * Static historical/reports prior (0–15 pts) contributing to historyReportsScore.
+   * Search region for the grid-scan break-finder (Step 2+).
+   * Replaces the old single-pin + bboxPad approach.
+   * The scanner sweeps this region at 0.1° resolution, sampling hot-cell SST
+   * vs ambientLat/ambientLng, and returns the cell with the highest confidence.
+   */
+  searchBbox: SearchBbox;
+  /**
+   * Minimum confidence score (0–100) required to plot this hotspot on the map.
+   * If the best cell found in searchBbox scores below this threshold the
+   * hotspot is suppressed entirely — no pin, no card.
+   * Default 60 — equivalent to at least a 3°F break + moderate SST proximity.
+   */
+  minConfidence: number;
+  /**
+   * Static historical/reports prior (0–10 pts) contributing to historyReportsScore.
    * Set at definition time; reflects multi-year catch frequency + current intel.
    */
   historyPrior: number;
@@ -567,11 +583,17 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 39.52,
     lng: -72.05,
     ambientLat: 39.52,
-    ambientLng: -72.8, // inshore shelf ~0.75° west — cooler shelf water for break reference
-    bboxPad: 0.15,
+    ambientLng: -72.8,
+    /**
+     * Search region: ~1.0°×1.0° band along the Hudson shelf break (39–40°N).
+     * The GS warm tongue typically pushes to the canyon head between 39.1–40.0°N.
+     * Eastern edge -71.5 captures GS interior; western edge -73.0 is well into
+     * cooler shelf water — scanner finds the break cell within this window.
+     */
+    searchBbox: { minLat: 39.0, maxLat: 40.0, minLng: -73.0, maxLng: -71.5 },
+    minConfidence: 58, // northern shelf — softer GS breaks; slightly lower bar
     idealSstF: 70,
-    siteIdealBreakDeltaF: 2.5, // northern shelf — GS influence less direct; softer breaks expected
-    // Strong NJ tuna grounds — consistent bigeye/YFT history; well-documented shelf break
+    siteIdealBreakDeltaF: 2.5,
     historyPrior: 12,
   },
   // ── OC, MD / Delaware area ──────────────────────────────────────────────
@@ -581,16 +603,18 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     fallbackSstF: 75,
     lat: 39.05,
     lng: -72.7,
-    // Shifted slightly south (39.05 → 38.90) to sample true Mid-Atlantic Bight shelf water
-    // rather than the warmer GS pool that biases the ambient reading upward at 39.05°N.
-    // 38.90°N at -73.45°W sits squarely on the cooler inshore shelf, providing a cleaner
-    // ΔT reference for the thermal-break score.
     ambientLat: 38.9,
     ambientLng: -73.45,
-    bboxPad: 0.15,
+    /**
+     * Search region: OC/DE shelf-break corridor (38.7–39.5°N).
+     * Spencer, Poorman's, and the surrounding edge all sit in this band.
+     * The warm filament typically enters from the SE — scan captures its
+     * leading edge wherever it actually is today.
+     */
+    searchBbox: { minLat: 38.7, maxLat: 39.5, minLng: -73.5, maxLng: -71.8 },
+    minConfidence: 60,
     idealSstF: 72,
-    siteIdealBreakDeltaF: 3.0, // northern shelf-break; moderate GS interaction
-    // Primary OC, MD tuna grounds — YFT currently active per current reports; high-percentage
+    siteIdealBreakDeltaF: 3.0,
     historyPrior: 14,
   },
   {
@@ -600,11 +624,15 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 39.38,
     lng: -72.25,
     ambientLat: 39.38,
-    ambientLng: -73.0, // inshore shelf ~0.75° west — cooler shelf water for break reference
-    bboxPad: 0.15,
+    ambientLng: -73.0,
+    /**
+     * Search region: Atlantis / Lindenkohl shelf area (38.9–39.7°N).
+     * Overlaps Spencer to the south; scanner selects the highest-confidence cell.
+     */
+    searchBbox: { minLat: 38.9, maxLat: 39.7, minLng: -73.0, maxLng: -71.6 },
+    minConfidence: 58,
     idealSstF: 71,
-    siteIdealBreakDeltaF: 2.5, // similar latitude to Hudson — softer GS breaks expected
-    // NJ/DE border grounds — solid tuna and white marlin producers
+    siteIdealBreakDeltaF: 2.5,
     historyPrior: 11,
   },
   // ── Mid-Atlantic shelf break ─────────────────────────────────────────────
@@ -612,21 +640,19 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     id: "3",
     title: "Baltimore Canyon",
     fallbackSstF: 76,
-    // Corrected to actual shelf-break canyon head (~200m isobath crossover).
-    // Previous coords (38.22, -73.82) sat over deep open ocean where MUR/ACSPO
-    // frequently returns no valid pixel — causing silent fallback to 76°F.
-    // 38.01°N / 74.05°W is the canyon head on the productive shelf edge where
-    // satellite SST pixels reliably exist.
     lat: 38.01,
     lng: -74.05,
     ambientLat: 38.01,
-    ambientLng: -74.8, // inshore shelf ~0.75° west — cooler shelf water for break reference
-    // Widened from 0.15 to 0.22 so the query bbox captures more shelf-break
-    // pixels before timing out — reduces chance of empty ERDDAP response.
-    bboxPad: 0.22,
+    ambientLng: -74.8,
+    /**
+     * Search region: Baltimore / Wilmington shelf-break corridor (37.7–38.4°N).
+     * The GS warm finger that pushes into Baltimore typically tracks between
+     * 73.5°W and 72.5°W at this latitude — scanner covers that meander range.
+     */
+    searchBbox: { minLat: 37.7, maxLat: 38.4, minLng: -74.8, maxLng: -73.2 },
+    minConfidence: 60,
     idealSstF: 74,
-    siteIdealBreakDeltaF: 3.5, // mid-range — warm GS finger common here; moderate-steep breaks
-    // Top MD/VA tournament ground — reliably warm Gulf Stream finger; YFT/marlin
+    siteIdealBreakDeltaF: 3.5,
     historyPrior: 13,
   },
   {
@@ -636,11 +662,16 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 38.52,
     lng: -73.42,
     ambientLat: 38.52,
-    ambientLng: -74.15, // inshore shelf ~0.75° west — cooler shelf water for break reference
-    bboxPad: 0.15,
+    ambientLng: -74.15,
+    /**
+     * Search region: Wilmington Canyon shelf-break arc (38.2–38.9°N).
+     * Extends east enough (-72.5°W) to capture the offshore GS edge when
+     * the break has moved away from the canyon head.
+     */
+    searchBbox: { minLat: 38.2, maxLat: 38.9, minLng: -74.2, maxLng: -72.5 },
+    minConfidence: 58,
     idealSstF: 72,
-    siteIdealBreakDeltaF: 3.0, // mid-shelf; moderate GS interaction
-    // Productive ledge; moderate historical data — consistent but not top-tier
+    siteIdealBreakDeltaF: 3.0,
     historyPrior: 9,
   },
   {
@@ -649,21 +680,19 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     fallbackSstF: 74,
     lat: 37.55,
     lng: -74.35,
-    // Corrected from 0.75° west offset (which can land in warm GS water) to a
-    // true inshore shelf reference ≈25 NM inshore at the same latitude.
-    // 37.55°N / -75.50°W is over Virginia inner-shelf (<50m depth) — consistently
-    // cooler shelf water that reliably shows the warm GS intrusion as a positive ΔT.
     ambientLat: 37.55,
     ambientLng: -75.5,
-    // Widened from 0.15 to 0.20 — captures the canyon-head pixels where the
-    // thermal break is sharpest (100–500m isobath crossing zone).
-    bboxPad: 0.2,
+    /**
+     * Search region: Washington / Norfolk canyon corridor (37.2–38.0°N).
+     * When the GS meanders north it can push warm water to 75.0°W or further;
+     * when it retreats the break falls back toward 73.5°W.
+     * The 1.2° latitude band captures both canyon heads in this corridor so the
+     * scanner finds the break wherever it actually sits today.
+     */
+    searchBbox: { minLat: 37.2, maxLat: 38.0, minLng: -75.5, maxLng: -73.5 },
+    minConfidence: 62,
     idealSstF: 73,
-    // GS-intrusion corridor: 4–5°F breaks are typical when GS meanders north into this canyon.
-    // Using 4.5°F as the ideal — chloro and altimetry bonus scales are calibrated to this ΔT.
     siteIdealBreakDeltaF: 4.5,
-    // GS pushes warm water north into this canyon corridor — elevated when GS meanders north.
-    // historyPrior raised to 12: when warm water reaches here, it concentrates YFT + white marlin.
     historyPrior: 12,
   },
   // ── South: VA / Hatteras ─────────────────────────────────────────────────
@@ -673,24 +702,18 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     fallbackSstF: 72,
     lat: 37.05,
     lng: -74.65,
-    // Corrected from 0.75° west offset to actual inshore shelf water ≈30 NM inshore.
-    // 37.05°N / -75.65°W sits on the Virginia inner-continental shelf (~20–40m depth)
-    // where coastal upwelling keeps water 4–8°F cooler than the canyon-head GS intrusion.
-    // The old -75.40°W reference sometimes landed in transitional shelf-break water that
-    // was already warming — artificially flattening the measured ΔT and suppressing the
-    // break sharpness score for what should be one of the region's top GS-break hotspots.
     ambientLat: 37.05,
     ambientLng: -75.65,
-    // Widened from 0.15 to 0.20 — ensures the ERDDAP bbox captures the canyon-head
-    // pixels at the 100–500m isobath where the warm GS water collides with cold shelf water.
-    bboxPad: 0.2,
+    /**
+     * Search region: Norfolk Canyon shelf-break arc (36.7–37.5°N).
+     * GS intrusion events push warm water to 74.0–75.0°W; shelf-water break
+     * can sit anywhere in this 1°×1° window depending on meander phase.
+     * Kept slightly tighter than Washington so the two defs don't duplicate results.
+     */
+    searchBbox: { minLat: 36.7, maxLat: 37.5, minLng: -75.5, maxLng: -73.8 },
+    minConfidence: 62,
     idealSstF: 71,
-    // GS-intrusion corridor: 4–6°F breaks are common when GS actively pushes north of 37°N.
-    // Using 4.5°F as the ideal — ensures chloro and altimetry bonuses fire at realistic ΔTs
-    // instead of rewarding marginal 1-2°F fluctuations.
     siteIdealBreakDeltaF: 4.5,
-    // When GS is near Norfolk (current scenario), warm water + SST break = prime YFT/mahi.
-    // historyPrior raised to 11: GS intrusion events here historically produce strong bites.
     historyPrior: 11,
   },
   {
@@ -700,13 +723,17 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lat: 35.15,
     lng: -75.2,
     ambientLat: 35.15,
-    ambientLng: -75.95, // inshore shelf ~0.75° west — cooler shelf water for break reference
-    bboxPad: 0.15,
+    ambientLng: -75.95,
+    /**
+     * Search region: Hatteras GS pinch zone (34.8–36.0°N).
+     * The widest search region — the GS shifts dramatically here and the break
+     * can be anywhere between 74°W (close to shore) and 76°W (inner shelf).
+     * 1.2° latitude band ensures the scanner catches the break wherever it is.
+     */
+    searchBbox: { minLat: 34.8, maxLat: 36.0, minLng: -76.2, maxLng: -74.0 },
+    minConfidence: 60,
     idealSstF: 76,
-    // GS pinch point — steepest breaks in the range; 5–7°F ΔT common when GS is tight to the cape.
-    // Using 5.0°F as ideal so the bonus scales reward genuine Hatteras-grade breaks.
     siteIdealBreakDeltaF: 5.0,
-    // Gulf Stream pinch point — strongest YFT/mahi/wahoo history in the range; early season
     historyPrior: 15,
   },
 ];

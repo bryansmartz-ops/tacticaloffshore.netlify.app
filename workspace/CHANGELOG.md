@@ -18,6 +18,24 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-31 — Fix build error: hotspotBBox removed from hotspots.ts but still imported in FishingMap.tsx
+- `FishingMap.tsx`: removed `hotspotBBox` + `HOTSPOT_BBOX_PAD` from import (both deleted from hotspots.ts in Step 1)
+- `FishingMap.tsx`: replaced `hotspotBBox(lat, lng, HOTSPOT_BBOX_PAD)` in `map.on("click")` handler with inline `±0.1°` bbox calculation — preserves identical query area
+- No changes to any other files; scanBreakInBbox useEffect and syncMarkers were already correct
+
+## 2026-05-31 — True Dynamic Hotspots Plan Step 4/4 ✅ (ALL STEPS COMPLETE)
+- `FishingMap.tsx`: Fixed `syncMarkers` crash — param was `_loadingSet` but body referenced `loadingSet` (ReferenceError at runtime blocking ALL marker rendering)
+- `FishingMap.tsx` + `Hotspots/index.tsx`: Fixed stale signal-bar maxes — SST bucket corrected 25→20, Break bucket corrected 25→35 to match Step 2 weight changes
+- `Hotspots/index.tsx`: Removed unused `formatSST` import (leftover from pre-scan-break era)
+- All 4 steps of True Dynamic Hotspots plan now complete and bug-free: searchBbox defs → scanbreak proxy → empty-map scan loop → fixed marker sync
+
+## 2026-05-31 — True Dynamic Hotspots Plan Step 2/4 ✅
+- `netlify/functions/sst-proxy.ts`: added `mode=scanbreak` route — sweeps a `SearchBbox` on a 0.25° grid (≤12 cells), samples ambient SST at `ambLat/ambLng`, returns cell with highest `breakDeltaF = hotTempF − ambTempF`
+- Grid constants: `SCAN_GRID_DEG=0.25°`, `SCAN_CELL_PAD=0.1°`, `SCAN_MAX_PARALLEL=12` — balances coverage vs ERDDAP load
+- `src/lib/erddap.ts`: added `ScanBreakParams` + `ScanBreakResult` types; exported `scanBreakInBbox(params)` — 45 s timeout client wrapper for the new proxy route
+- Step 1/4 ✅: `SearchBbox` + `minConfidence` on every `HotspotDef` in `hotspots.ts`
+- Steps 3+4 remaining: rewrite FishingMap fetch loop to use scanBreakInBbox; update distance labels
+
 ## 2026-05-31 — Confidence Weighting Plan ALL 4 STEPS COMPLETE ✅
 - **Step 4**: Added `siteIdealBreakDeltaF` field to `HotspotDef`; `estimateChloroScore` + `estimateAltimetryScore` now accept it as 3rd/4th param
 - Per-site calibrations: Diamond Shoals=5.0°F, Norfolk/Washington=4.5°F, Baltimore=3.5°F, Spencer/Wilmington=3.0°F, Hudson/Atlantis=2.5°F

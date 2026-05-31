@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import FishingMap from "../../components/FishingMap";
 import type { HotspotDisplay } from "../../components/FishingMap";
-import { getCacheAge, formatSST, gibsSSTDate } from "../../lib/erddap";
+import { getCacheAge, gibsSSTDate } from "../../lib/erddap";
 import {
   toLoranTD,
   confidenceColor,
@@ -280,13 +280,13 @@ export default function Hotspots() {
                     {
                       label: "SST",
                       val: h.signals.sstScore,
-                      max: 25,
+                      max: 20,
                       color: "#fb923c",
                     },
                     {
                       label: "Break",
                       val: h.signals.sstBreakScore,
-                      max: 25,
+                      max: 35,
                       color: "#fbbf24",
                     },
                     {
