@@ -17,7 +17,8 @@
     "lucide-react": "^0.294.0",
     "@animaapp/playground-react-sdk": "0.10.0",
     "@supabase/supabase-js": "^2.43.4",
-    "resend": "^3.2.0"
+    "resend": "^3.2.0",
+    "@anthropic-ai/sdk": "^0.22.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",
