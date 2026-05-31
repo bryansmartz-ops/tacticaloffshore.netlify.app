@@ -54,20 +54,10 @@ interface DailyBriefRecord extends LlmFields {
   total_day_duration: string;
 }
 
-interface NwsPeriod {
-  name: string;
-  detailedForecast: string;
-}
-
-interface NwsForecastResponse {
-  properties: {
-    periods: NwsPeriod[];
-  };
-}
-
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const NWS_POINTS_URL = "https://api.weather.gov/points/37.65,-74.80" as const;
+// Direct Bulletproof text endpoint for Zone ANZ655 (Chincoteague to Parramore Island offshore)
+const NWS_MARINE_TEXT_URL = "https://api.weather.gov/glos/products/public/LWX/CWFLWX" as const;
 
 const ERDDAP_URL = [
   "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.json",
@@ -87,7 +77,6 @@ const PERFORMANCE = {
 } as const;
 
 const RECIPIENT_EMAIL = "bryan.s.martz@gmail.com" as const;
-const FORECAST_ZONE = "ANZ655" as const;
 
 // ─── Time Calculations ────────────────────────────────────────────────────────
 
@@ -128,44 +117,32 @@ function calculateTransitTimes(): TransitTimes {
 // ─── Data Fetchers ────────────────────────────────────────────────────────────
 
 async function fetchNWSForecast(): Promise<string> {
-  // Step 1: Hit the coordinate system endpoint to pull the custom offshore text page
-  const pointsRes = await fetch(NWS_POINTS_URL, {
-    headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
-  });
-
-  if (!pointsRes.ok) {
-    throw new Error(`NWS Points API error ${pointsRes.status}: ${pointsRes.statusText}`);
-  }
-
-  const pointsData = await pointsRes.json() as any;
-  
-  // Explicitly query the open-ocean offshore forecast line to prevent 404 zone mismatches
-  const dynamicForecastUrl = pointsData?.properties?.forecastOffshore || pointsData?.properties?.forecast;
-
-  if (!dynamicForecastUrl) {
-    throw new Error("Failed to extract marine forecast URL from NWS points metadata.");
-  }
-
-  // Step 2: Fetch the actual weather forecast grids using the verified offshore link
-  const res = await fetch(dynamicForecastUrl, {
+  // Hits the direct Coastal/Offshore text text engine product line
+  const res = await fetch(NWS_MARINE_TEXT_URL, {
     headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
   });
 
   if (!res.ok) {
-    throw new Error(`NWS Forecast API error ${res.status}: ${res.statusText}`);
+    throw new Error(`NWS Marine Text API error ${res.status}: ${res.statusText}`);
   }
 
-  const data = (await res.json()) as NwsForecastResponse;
-  const periods = data?.properties?.periods ?? [];
+  const data = await res.json() as any;
+  const rawText = data?.productText;
 
-  if (!periods.length) {
-    throw new Error("NWS returned no forecast periods.");
+  if (!rawText) {
+    throw new Error("Failed to extract raw forecast text from NWS text product block.");
   }
 
-  return periods
-    .slice(0, 4)
-    .map((p) => `[${p.name}] ${p.detailedForecast}`)
-    .join("\n\n");
+  // Isolates ANZ655 metrics out of the collective text product
+  if (rawText.includes("ANZ655")) {
+    const lines = rawText.split("\n");
+    const startIndex = lines.findIndex((l: string) => l.includes("ANZ655"));
+    // Grab the next 35 lines of detailed wind/wave records for this specific zone
+    return lines.slice(startIndex, startIndex + 35).join("\n");
+  }
+
+  // Backup fallback: feed the raw weather bulletin text directly to Claude to sort
+  return rawText.slice(0, 2000);
 }
 
 async function fetchERDDAPSst(): Promise<SstData> {
@@ -225,7 +202,7 @@ Always respond with valid JSON only. No markdown fences, no commentary.`;
   const userPrompt = `Generate a daily offshore fishing brief JSON object using ONLY the data below.
 Today's date: ${new Date().toISOString().split("T")[0]}
 
-=== NWS MARINE FORECAST (ANZ655) ===
+=== NWS MARINE FORECAST TEXT (ANZ655 REGION) ===
 ${nwsForecast}
 
 === SST DATA (Mid-Atlantic Canyons, MUR Analysis) ===
