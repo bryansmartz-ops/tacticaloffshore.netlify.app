@@ -131,7 +131,6 @@ async function fetchGlobalWeather(): Promise<string> {
     throw new Error("Failed to extract hourly metrics from Global Weather API.");
   }
 
-  // Sample conditions at 6:00 AM, 12:00 PM, and 4:00 PM to chart your trip timeline
   const indices = [6, 12, 16];
   const summaryBlocks = indices.map(i => {
     const timeLabel = hourly.time[i] ? new Date(hourly.time[i]).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : `${i}:00`;
@@ -229,8 +228,9 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
+  // Updated to the official production string 'claude-3-5-sonnet-latest'
   const message = await client.messages.create({
-    model: "claude-3-5-sonnet-20241022",
+    model: "claude-3-5-sonnet-latest",
     max_tokens: 1200,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
