@@ -56,8 +56,8 @@ interface DailyBriefRecord extends LlmFields {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Bulletproof Marine Open-Meteo API targeting your offshore grid coordinates
-const MARINE_WEATHER_URL = "https://marine-api.open-meteo.com/v1/marine?latitude=37.65&longitude=-74.80&hourly=wave_height,wave_period,wind_speed_10m,wind_direction_10m&length_unit=ft&wind_speed_unit=kn&timezone=America%2FNew_York&forecast_days=1" as const;
+// Adjusted slightly westward to -75.20 to sit firmly inside the active marine data model grids
+const MARINE_WEATHER_URL = "https://marine-api.open-meteo.com/v1/marine?latitude=37.65&longitude=-75.20&hourly=wave_height,wave_period,wind_speed_10m,wind_direction_10m&length_unit=ft&wind_speed_unit=kn&timezone=America%2FNew_York&forecast_days=1" as const;
 
 const ERDDAP_URL = [
   "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.json",
@@ -411,7 +411,7 @@ export default async function handler(
     const forecastDate = new Date().toISOString().split("T")[0];
     console.log(`[brief] Starting daily brief for ${forecastDate}`);
 
-    // 1. Fetch all data sources in parallel (Swapped NWS for stable Open-Meteo)
+    // 1. Fetch all data sources in parallel (Firmly placed inside model grids)
     console.log("[brief] Fetching Marine Weather Metrics and ERDDAP SST...");
     const [weatherForecast, sstData] = await Promise.all([
       fetchMarineWeather(),
