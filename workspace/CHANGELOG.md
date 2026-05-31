@@ -18,6 +18,12 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-31 — Confidence Weighting Plan ALL 4 STEPS COMPLETE ✅
+- **Step 4**: Added `siteIdealBreakDeltaF` field to `HotspotDef`; `estimateChloroScore` + `estimateAltimetryScore` now accept it as 3rd/4th param
+- Per-site calibrations: Diamond Shoals=5.0°F, Norfolk/Washington=4.5°F, Baltimore=3.5°F, Spencer/Wilmington=3.0°F, Hudson/Atlantis=2.5°F
+- `buildHotspotSignals` passes `def.siteIdealBreakDeltaF ?? 3` into both proxy scorers — each canyon rewarded at its own expected GS-intrusion ΔT
+- Full plan summary: Step1=ambient coords fixed; Step2=buckets 35/20/20/15/10; Step3=GS-intrusion multiplier; Step4=per-site break threshold
+
 ## 2026-05-30 (Plan Step 4/4 — Hotspot card list uses distanceLabel as heading)
 - `src/sections/Hotspots/index.tsx`: card `<h3>` now renders `h.distanceLabel ?? h.title` — matches map marker label exactly
 - Cards now read "14NM SE of Hudson • DYNAMIC" instead of the raw canyon title
