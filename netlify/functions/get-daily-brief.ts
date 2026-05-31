@@ -230,7 +230,7 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
 
   // Swapped to naked, generic 'claude' base target to strip away version validation loops
   const message = await client.messages.create({
-    model: "claude",
+    model: "gpt-4",
     max_tokens: 1200,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
