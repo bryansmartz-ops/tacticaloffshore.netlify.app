@@ -5,7 +5,7 @@
 import type { Config, Context } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -182,7 +182,7 @@ async function fetchERDDAPSst(): Promise<SstData> {
 
 // ─── LLM Synthesis ────────────────────────────────────────────────────────────
 
-async function synthesizeWithOpenAI({
+async function synthesizeWithClaude({
   weatherForecast,
   sstData,
   transitTimes,
@@ -191,8 +191,7 @@ async function synthesizeWithOpenAI({
   sstData: SstData;
   transitTimes: TransitTimes;
 }): Promise<LlmFields> {
-  // Leverages the ANTHROPIC_API_KEY environment slot to feed your gateway proxy route
-  const openai = new OpenAI({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const systemPrompt = `You are a professional offshore fishing report writer specializing in Mid-Atlantic canyon fishing (Washington Canyon to Poorman's Canyon).
 You produce concise, tactical, data-driven fishing briefs for experienced captains.
@@ -229,251 +228,20 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
-  // Swapped core runtime routing engine over to the universal 'gpt-4o' target name
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt }
-    ],
-    response_format: { type: "json_object" }
+  // Stable production snapshot identifier string
+  const message = await client.messages.create({
+    model: "claude-3-5-sonnet-20241022",
+    max_tokens: 1200,
+    system: systemPrompt,
+    messages: [{ role: "user", content: userPrompt }],
   });
 
-  const raw = response.choices[0]?.message?.content?.trim();
+  const firstBlock = message.content[0];
+  const raw = firstBlock?.type === "text" ? firstBlock.text.trim() : null;
 
   if (!raw) {
-    throw new Error("OpenAI returned an empty response block.");
+    throw new Error("Claude returned an empty response.");
   }
 
   try {
     return JSON.parse(raw) as LlmFields;
-  } catch {
-    throw new Error(`OpenAI response was not valid JSON:\n${raw}`);
-  }
-}
-
-// ─── Supabase Writer ──────────────────────────────────────────────────────────
-
-async function writeToSupabase(record: DailyBriefRecord): Promise<{ id: string }> {
-  const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-
-  const { data, error } = await supabase
-    .from("daily_briefs")
-    .insert([record])
-    .select()
-    .single<{ id: string }>();
-
-  if (error) {
-    throw new Error(`Supabase insert failed: ${error.message}`);
-  }
-
-  if (!data) {
-    throw new Error("Supabase insert returned no data.");
-  }
-
-  return data;
-}
-
-// ─── Email Renderer ───────────────────────────────────────────────────────────
-
-function buildEmailHtml(record: DailyBriefRecord): string {
-  const row = (label: string, value: string | null | undefined): string =>
-    value
-      ? `<tr>
-           <td style="padding:6px 12px;font-weight:600;color:#64748b;white-space:nowrap;">${label}</td>
-           <td style="padding:6px 12px;">${value}</td>
-         </tr>`
-      : "";
-
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><title>Daily Offshore Brief</title></head>
-<body style="margin:0;padding:0;background:#0f172a;font-family:'Segoe UI',Arial,sans-serif;color:#e2e8f0;">
-  <div style="max-width:680px;margin:32px auto;background:#1e293b;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.4);">
-
-    <div style="background:linear-gradient(135deg,#0c4a6e,#0369a1);padding:28px 32px;">
-      <h1 style="margin:0;font-size:22px;font-weight:700;color:#f0f9ff;letter-spacing:0.5px;">
-        ⚓ Tactical Offshore Daily Brief
-      </h1>
-      <p style="margin:6px 0 0;color:#bae6fd;font-size:14px;">
-        ${record.forecast_date} — Mid-Atlantic Canyons
-      </p>
-    </div>
-
-    <div style="padding:24px 32px;">
-      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">
-        Environmental Overview
-      </h2>
-      <p style="margin:0 0 24px;line-height:1.7;color:#cbd5e1;">${record.environmental_summary}</p>
-
-      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">
-        Water Conditions
-      </h2>
-      <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:24px;">
-        ${row("Shelf Temp", record.shelf_temp)}
-        ${row("Canyon Wall Temp", record.canyon_wall_temp)}
-        ${row("Thermal Break", record.break_zone_description)}
-        ${row("Altimetry / Currents", record.altimetry_currents)}
-      </table>
-
-      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">
-        Weather
-      </h2>
-      <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:24px;">
-        ${row("Wind", record.wind_forecast)}
-        ${row("Sea State", record.sea_state)}
-        ${row("Barometric Pressure", record.barometric_pressure)}
-      </table>
-
-      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">
-        Transit Plan
-      </h2>
-      <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:24px;">
-        ${row("Morning Run", record.morning_run_time)}
-        ${row("Troll Time", record.total_troll_time)}
-        ${row("Afternoon Run", record.afternoon_run_time)}
-        ${row("Total Day", record.total_day_duration)}
-      </table>
-
-      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">
-        Tactical
-      </h2>
-      <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:24px;">
-        ${row("Trolling Spread", record.trolling_spread)}
-        ${row("Sonar Strategy", record.sonar_strategy)}
-      </table>
-
-      ${
-        record.operational_warning
-          ? `<div style="background:#7c1d1d;border-left:4px solid #ef4444;padding:14px 18px;border-radius:6px;margin-bottom:24px;">
-               <strong style="color:#fca5a5;">⚠ Operational Warning</strong>
-               <p style="margin:6px 0 0;color:#fecaca;">${record.operational_warning}</p>
-             </div>`
-          : ""
-      }
-    </div>
-
-    <div style="padding:16px 32px;border-top:1px solid #334155;text-align:center;">
-      <p style="margin:0;font-size:12px;color:#475569;">
-        Generated by Tactical Offshore · tacticaloffshore.netlify.app
-      </p>
-    </div>
-  </div>
-</body>
-</html>`;
-}
-
-async function sendEmail(record: DailyBriefRecord): Promise<{ id?: string }> {
-  const resend = new Resend(process.env.RESEND_API_KEY);
-  
-  const { data, error } = await resend.emails.send({
-    from: "Tactical Offshore <onboarding@resend.dev>",
-    to: ["Bryan.s.martz@gmail.com"],
-    subject: `⚓ Daily Brief — ${record.forecast_date}`,
-    html: buildEmailHtml(record),
-  });
-
-  if (error) {
-    throw new Error(`Resend email failed: ${JSON.stringify(error)}`);
-  }
-  
-  return data || {};
-}
-
-// ─── Environment Validation ───────────────────────────────────────────────────
-
-function validateEnv(): void {
-  const required = [
-    "ANTHROPIC_API_KEY",
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "RESEND_API_KEY",
-  ] as const;
-
-  const missing = required.filter((k) => !process.env[k]);
-
-  if (missing.length) {
-    throw new Error(
-      `Missing required environment variables: ${missing.join(", ")}`
-    );
-  }
-}
-
-// ─── Netlify v2 Handler ───────────────────────────────────────────────────────
-
-export default async function handler(
-  _req: Request,
-  _context: Context
-): Promise<Response> {
-  try {
-    validateEnv();
-
-    const forecastDate = new Date().toISOString().split("T")[0];
-    console.log(`[brief] Starting daily brief for ${forecastDate}`);
-
-    // 1. Fetch data sources
-    console.log("[brief] Fetching Global Weather Vectors and ERDDAP SST...");
-    const [weatherForecast, sstData] = await Promise.all([
-      fetchGlobalWeather(),
-      fetchERDDAPSst(),
-    ]);
-    console.log("[brief] Data fetch complete.");
-
-    // 2. Calculate transit times
-    const transitTimes = calculateTransitTimes();
-    console.log("[brief] Transit times calculated:", transitTimes);
-
-    // 3. Synthesize with OpenAI GPT-4o to bypass proxy router block
-    console.log("[brief] Sending to GPT-4o for synthesis...");
-    const llmFields = await synthesizeWithOpenAI({
-      weatherForecast,
-      sstData,
-      transitTimes,
-    });
-    console.log("[brief] LLM synthesis complete.");
-
-    // 4. Assemble the full database record
-    const record: DailyBriefRecord = {
-      forecast_date: forecastDate,
-      ...llmFields,
-      morning_run_time: transitTimes.morning_run_time,
-      afternoon_run_time: transitTimes.afternoon_run_time,
-      total_troll_time: transitTimes.total_troll_time,
-      total_day_duration: transitTimes.total_day_duration,
-    };
-
-    // 5. Write to Supabase
-    console.log("[brief] Writing to Supabase...");
-    const savedRecord = await writeToSupabase(record);
-    console.log(`[brief] Saved record id: ${savedRecord.id}`);
-
-    // 6. Send email
-    console.log("[brief] Sending email via Resend...");
-    const emailResult = await sendEmail(record);
-    console.log(`[brief] Email sent, id: ${emailResult?.id}`);
-
-    return Response.json({
-      success: true,
-      record_id: savedRecord.id,
-      forecast_date: forecastDate,
-      email_id: emailResult?.id ?? null,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[brief] FATAL ERROR:", message);
-
-    return Response.json(
-      { success: false, error: message },
-      { status: 500 }
-    );
-  }
-}
-
-// ─── Netlify Function Config ──────────────────────────────────────────────────
-
-export const config: Config = {
-  schedule: "0 9 * * *", // 09:00 UTC = ~05:00 EDT
-};
