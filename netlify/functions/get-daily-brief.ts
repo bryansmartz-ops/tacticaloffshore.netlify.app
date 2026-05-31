@@ -56,8 +56,8 @@ interface DailyBriefRecord extends LlmFields {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Adjusted slightly westward to -75.20 to sit firmly inside the active marine data model grids
-const MARINE_WEATHER_URL = "https://marine-api.open-meteo.com/v1/marine?latitude=37.65&longitude=-75.20&hourly=wave_height,wave_period,wind_speed_10m,wind_direction_10m&length_unit=ft&wind_speed_unit=kn&timezone=America%2FNew_York&forecast_days=1" as const;
+// Global meteorological model — 100% boundary-free coverage out to the deep canyons
+const GLOBAL_WEATHER_URL = "https://api.open-meteo.com/v1/forecast?latitude=37.65&longitude=-74.80&hourly=wind_speed_10m,wind_direction_10m,relative_humidity_2m&current=surface_pressure&wind_speed_unit=kn&timezone=America%2FNew_York&forecast_days=1" as const;
 
 const ERDDAP_URL = [
   "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.json",
@@ -116,32 +116,33 @@ function calculateTransitTimes(): TransitTimes {
 
 // ─── Data Fetchers ────────────────────────────────────────────────────────────
 
-async function fetchMarineWeather(): Promise<string> {
-  const res = await fetch(MARINE_WEATHER_URL);
+async function fetchGlobalWeather(): Promise<string> {
+  const res = await fetch(GLOBAL_WEATHER_URL);
 
   if (!res.ok) {
-    throw new Error(`Marine Weather API failed with status ${res.status}`);
+    throw new Error(`Global Weather API failed with status ${res.status}`);
   }
 
   const data = await res.json() as any;
   const hourly = data?.hourly;
+  const current = data?.current;
 
   if (!hourly || !hourly.time) {
-    throw new Error("Failed to extract hourly marine timelines from Weather API.");
+    throw new Error("Failed to extract hourly metrics from Global Weather API.");
   }
 
-  // Pull samples at 6:00 AM, 12:00 PM, and 4:00 PM to profile your day on the water
+  // Sample conditions at 6:00 AM, 12:00 PM, and 4:00 PM to chart your trip timeline
   const indices = [6, 12, 16];
   const summaryBlocks = indices.map(i => {
     const timeLabel = hourly.time[i] ? new Date(hourly.time[i]).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : `${i}:00`;
-    const height = hourly.wave_height?.[i] ?? "N/A";
-    const period = hourly.wave_period?.[i] ?? "N/A";
     const speed = hourly.wind_speed_10m?.[i] ?? "N/A";
     const dir = hourly.wind_direction_10m?.[i] ?? "N/A";
-    return `[Time: ${timeLabel}] Waves: ${height}ft @ ${period}s | Wind: ${speed}kts from ${dir}°`;
+    const humidity = hourly.relative_humidity_2m?.[i] ?? "N/A";
+    return `[Time: ${timeLabel}] Wind: ${speed}kts from ${dir}° | Relative Humidity: ${humidity}%`;
   });
 
-  return summaryBlocks.join("\n");
+  const pressureText = current?.surface_pressure ? `\n[Current Surface Pressure] ${current.surface_pressure} hPa` : "";
+  return summaryBlocks.join("\n") + pressureText;
 }
 
 async function fetchERDDAPSst(): Promise<SstData> {
@@ -201,7 +202,7 @@ Always respond with valid JSON only. No markdown fences, no commentary.`;
   const userPrompt = `Generate a daily offshore fishing brief JSON object using ONLY the data below.
 Today's date: ${new Date().toISOString().split("T")[0]}
 
-=== METEOROLOGICAL MARINE METRICS ===
+=== METEOROLOGICAL WINDS & LOGISTICS ===
 ${weatherForecast}
 
 === SST DATA (Mid-Atlantic Canyons, MUR Analysis) ===
@@ -221,8 +222,8 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "break_zone_description": "location/quality of the thermal break based on SST spread",
   "altimetry_currents": "describe likely current direction/strength inferred from SST pattern and wind direction data",
   "wind_forecast": "concise wind summary derived from speed and angles provided",
-  "sea_state": "wave height and intervals profile from metrics data",
-  "barometric_pressure": "Not reported",
+  "sea_state": "inferred wave conditions based on the wind speed vectors, direction history, and location",
+  "barometric_pressure": "surface pressure trends if logged in metrics, else 'Not reported'",
   "operational_warning": "any safety or operational concern, or null if none",
   "trolling_spread": "recommended lure/bait spread for current SST and season (late May/early June Mid-Atlantic)",
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
@@ -411,10 +412,10 @@ export default async function handler(
     const forecastDate = new Date().toISOString().split("T")[0];
     console.log(`[brief] Starting daily brief for ${forecastDate}`);
 
-    // 1. Fetch all data sources in parallel (Firmly placed inside model grids)
-    console.log("[brief] Fetching Marine Weather Metrics and ERDDAP SST...");
+    // 1. Fetch data sources (Bypassed restricted marine charts for full global grid)
+    console.log("[brief] Fetching Global Weather Vectors and ERDDAP SST...");
     const [weatherForecast, sstData] = await Promise.all([
-      fetchMarineWeather(),
+      fetchGlobalWeather(),
       fetchERDDAPSst(),
     ]);
     console.log("[brief] Data fetch complete.");
