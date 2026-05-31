@@ -145,9 +145,17 @@ async function fetchNWSForecast(): Promise<string> {
   }
 
   // Step 2: Fetch the actual weather forecast periods using the link provided by NWS
-  const res = await fetch(dynamicForecastUrl, {
+  let res = await fetch(dynamicForecastUrl, {
     headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
   });
+
+  // Backup: If the primary land forecast page is a 404, swap to the official marine text endpoint
+  if (res.status === 404) {
+    const marineForecastUrl = dynamicForecastUrl.replace("/forecast", "/forecast/marines");
+    res = await fetch(marineForecastUrl, {
+      headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
+    });
+  }
 
   if (!res.ok) {
     throw new Error(`NWS Forecast API error ${res.status}: ${res.statusText}`);
