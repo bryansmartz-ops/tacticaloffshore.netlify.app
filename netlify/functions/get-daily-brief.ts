@@ -128,7 +128,7 @@ function calculateTransitTimes(): TransitTimes {
 // ─── Data Fetchers ────────────────────────────────────────────────────────────
 
 async function fetchNWSForecast(): Promise<string> {
-  // Step 1: Hit the points URL to get the custom grid metadata
+  // Step 1: Hit the coordinate system endpoint to pull the custom offshore text page
   const pointsRes = await fetch(NWS_POINTS_URL, {
     headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
   });
@@ -138,24 +138,18 @@ async function fetchNWSForecast(): Promise<string> {
   }
 
   const pointsData = await pointsRes.json() as any;
-  const dynamicForecastUrl = pointsData?.properties?.forecast;
+  
+  // Explicitly query the open-ocean offshore forecast line to prevent 404 zone mismatches
+  const dynamicForecastUrl = pointsData?.properties?.forecastOffshore || pointsData?.properties?.forecast;
 
   if (!dynamicForecastUrl) {
     throw new Error("Failed to extract marine forecast URL from NWS points metadata.");
   }
 
-  // Step 2: Fetch the actual weather forecast periods using the link provided by NWS
-  let res = await fetch(dynamicForecastUrl, {
+  // Step 2: Fetch the actual weather forecast grids using the verified offshore link
+  const res = await fetch(dynamicForecastUrl, {
     headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
   });
-
-  // Backup: If the primary land forecast page is a 404, swap to the official marine text endpoint
-  if (res.status === 404) {
-    const marineForecastUrl = dynamicForecastUrl.replace("/forecast", "/forecast/marines");
-    res = await fetch(marineForecastUrl, {
-      headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
-    });
-  }
 
   if (!res.ok) {
     throw new Error(`NWS Forecast API error ${res.status}: ${res.statusText}`);
