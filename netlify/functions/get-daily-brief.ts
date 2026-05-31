@@ -67,7 +67,7 @@ interface NwsForecastResponse {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const NWS_ZONE_URL = "https://api.weather.gov/zones/forecast/ANZ651/forecast" as const;
+const NWS_ZONE_URL = "https://api.weather.gov/zones/forecast/ANZ655/forecast" as const;
 
 const ERDDAP_URL = [
   "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.json",
@@ -87,7 +87,7 @@ const PERFORMANCE = {
 } as const;
 
 const RECIPIENT_EMAIL = "bryan.s.martz@gmail.com" as const;
-const FORECAST_ZONE = "ANZ651" as const;
+const FORECAST_ZONE = "ANZ655" as const;
 
 // ─── Time Calculations ────────────────────────────────────────────────────────
 
@@ -211,7 +211,7 @@ Always respond with valid JSON only. No markdown fences, no commentary.`;
   const userPrompt = `Generate a daily offshore fishing brief JSON object using ONLY the data below.
 Today's date: ${new Date().toISOString().split("T")[0]}
 
-=== NWS MARINE FORECAST (ANZ651) ===
+=== NWS MARINE FORECAST (ANZ655) ===
 ${nwsForecast}
 
 === SST DATA (Mid-Atlantic Canyons, MUR Analysis) ===
