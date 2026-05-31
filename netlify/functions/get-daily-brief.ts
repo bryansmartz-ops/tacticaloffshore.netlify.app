@@ -228,9 +228,9 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
-  // Updated to the official production string 'claude-3-5-sonnet-latest'
+  // Swapped to standard, universally accepted legacy core engine 'claude-3-opus-20240229'
   const message = await client.messages.create({
-    model: "claude-3-5-sonnet-latest",
+    model: "claude-3-opus-20240229",
     max_tokens: 1200,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
