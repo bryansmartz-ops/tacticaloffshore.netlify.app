@@ -228,9 +228,9 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
-  // Swapped to naked, generic 'claude' base target to strip away version validation loops
+  // Updated with the required provider prefix to unlock the aggregator proxy route
   const message = await client.messages.create({
-    model: "gpt-4",
+    model: "anthropic/claude-3.5-sonnet",
     max_tokens: 1200,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
