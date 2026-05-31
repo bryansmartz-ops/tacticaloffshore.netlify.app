@@ -70,7 +70,7 @@ interface NwsForecastResponse {
 const NWS_ZONE_URL = "https://api.weather.gov/zones/forecast/ANZ651/forecast" as const;
 
 const ERDDAP_URL = [
-  "[coastwatch.pfeg.noaa.gov](https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.json)",
+  "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.json",
   "?analysed_sst",
   "[(last)]",
   "[(37.40):(37.87)]",
