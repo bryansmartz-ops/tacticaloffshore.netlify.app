@@ -473,5 +473,5 @@ export default async function handler(
 // ─── Netlify Function Config ──────────────────────────────────────────────────
 
 export const config: Config = {
-  schedule: "0 9 * * *", // 09:00 UTC = ~05:00 EDT
+  schedule: "0 8 * * *", // 08:00 UTC = 4:00 AM Eastern Time (EDT)
 };
