@@ -56,8 +56,8 @@ interface DailyBriefRecord extends LlmFields {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Direct Bulletproof text endpoint for Zone ANZ655 (Chincoteague to Parramore Island offshore)
-const NWS_MARINE_TEXT_URL = "https://api.weather.gov/glos/products/public/LWX/CWFLWX" as const;
+// Bulletproof Public Marine Bulletin URL for the Mid-Atlantic offshore waters
+const NWS_OFFSHORE_BULLETIN_URL = "https://tgftp.nws.noaa.gov/data/forecasts/marine/coastal/an/cwfphi.txt" as const;
 
 const ERDDAP_URL = [
   "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.json",
@@ -117,32 +117,29 @@ function calculateTransitTimes(): TransitTimes {
 // ─── Data Fetchers ────────────────────────────────────────────────────────────
 
 async function fetchNWSForecast(): Promise<string> {
-  // Hits the direct Coastal/Offshore text text engine product line
-  const res = await fetch(NWS_MARINE_TEXT_URL, {
+  const res = await fetch(NWS_OFFSHORE_BULLETIN_URL, {
     headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
   });
 
   if (!res.ok) {
-    throw new Error(`NWS Marine Text API error ${res.status}: ${res.statusText}`);
+    throw new Error(`NWS Marine Text Bulletin failed with status ${res.status}`);
   }
 
-  const data = await res.json() as any;
-  const rawText = data?.productText;
-
-  if (!rawText) {
-    throw new Error("Failed to extract raw forecast text from NWS text product block.");
+  const rawText = await res.text();
+  if (!rawText || rawText.trim().length === 0) {
+    throw new Error("NWS Marine Bulletin text returned an empty document block.");
   }
 
-  // Isolates ANZ655 metrics out of the collective text product
-  if (rawText.includes("ANZ655")) {
+  // Parse out the text sections relative to the Mid-Atlantic and specific canyons
+  if (rawText.includes("ANZ655") || rawText.includes("Fenwick Island")) {
     const lines = rawText.split("\n");
-    const startIndex = lines.findIndex((l: string) => l.includes("ANZ655"));
-    // Grab the next 35 lines of detailed wind/wave records for this specific zone
-    return lines.slice(startIndex, startIndex + 35).join("\n");
+    const startIndex = lines.findIndex(l => l.includes("ANZ655") || l.includes("Fenwick Island"));
+    if (startIndex !== -1) {
+      return lines.slice(startIndex, startIndex + 50).join("\n");
+    }
   }
 
-  // Backup fallback: feed the raw weather bulletin text directly to Claude to sort
-  return rawText.slice(0, 2000);
+  return rawText.slice(0, 2500);
 }
 
 async function fetchERDDAPSst(): Promise<SstData> {
@@ -202,7 +199,7 @@ Always respond with valid JSON only. No markdown fences, no commentary.`;
   const userPrompt = `Generate a daily offshore fishing brief JSON object using ONLY the data below.
 Today's date: ${new Date().toISOString().split("T")[0]}
 
-=== NWS MARINE FORECAST TEXT (ANZ655 REGION) ===
+=== NWS MARINE FORECAST TEXT (OFFSHORE SECTOR) ===
 ${nwsForecast}
 
 === SST DATA (Mid-Atlantic Canyons, MUR Analysis) ===
