@@ -228,9 +228,9 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
-  // Mapped to baseline token to safely bypass local wrapper configuration blocks
+  // Swapped to naked, generic 'claude' base target to strip away version validation loops
   const message = await client.messages.create({
-    model: "claude-2.1",
+    model: "claude",
     max_tokens: 1200,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
