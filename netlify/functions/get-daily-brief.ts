@@ -128,16 +128,29 @@ function calculateTransitTimes(): TransitTimes {
 // ─── Data Fetchers ────────────────────────────────────────────────────────────
 
 async function fetchNWSForecast(): Promise<string> {
-  const res = await fetch(NWS_ZONE_URL, {
-    headers: {
-      "User-Agent": `TacticalOffshore/1.0 ${RECIPIENT_EMAIL}`,
-    },
+  // Step 1: Hit the points URL to get the custom grid metadata
+  const pointsRes = await fetch(NWS_POINTS_URL, {
+    headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
+  });
+
+  if (!pointsRes.ok) {
+    throw new Error(`NWS Points API error ${pointsRes.status}: ${pointsRes.statusText}`);
+  }
+
+  const pointsData = await pointsRes.json() as any;
+  const dynamicForecastUrl = pointsData?.properties?.forecast;
+
+  if (!dynamicForecastUrl) {
+    throw new Error("Failed to extract marine forecast URL from NWS points metadata.");
+  }
+
+  // Step 2: Fetch the actual weather forecast periods using the link provided by NWS
+  const res = await fetch(dynamicForecastUrl, {
+    headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
   });
 
   if (!res.ok) {
-    throw new Error(
-      `NWS API error ${res.status}: ${res.statusText} for zone ${FORECAST_ZONE}`
-    );
+    throw new Error(`NWS Forecast API error ${res.status}: ${res.statusText}`);
   }
 
   const data = (await res.json()) as NwsForecastResponse;
@@ -167,7 +180,6 @@ async function fetchERDDAPSst(): Promise<SstData> {
     throw new Error("ERDDAP returned no SST rows.");
   }
 
-  // Column index 3 = analysed_sst in Kelvin
   const sstValues: number[] = rows
     .map((r) => r[3])
     .filter((v): v is number => v !== null && !isNaN(v))
@@ -239,15 +251,14 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
 }`;
 
   const message = await client.messages.create({
-    model: "claude-opus-4-5",
-    max_tokens: 1024,
+    model: "claude-3-5-sonnet-20241022",
+    max_tokens: 1200,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
   });
 
   const firstBlock = message.content[0];
-  const raw =
-    firstBlock?.type === "text" ? firstBlock.text.trim() : null;
+  const raw = firstBlock?.type === "text" ? firstBlock.text.trim() : null;
 
   if (!raw) {
     throw new Error("Claude returned an empty response.");
@@ -375,25 +386,21 @@ function buildEmailHtml(record: DailyBriefRecord): string {
 }
 
 async function sendEmail(record: DailyBriefRecord): Promise<{ id?: string }> {
-    const resend = new Resend(process.env.RESEND_API_KEY);
+  const resend = new Resend(process.env.RESEND_API_KEY);
   
-    const { data, error } = await resend.emails.send({
-      // 1. MUST use Resend's official sandbox email to bypass security checks
-      from: "Tactical Offshore <onboarding@resend.dev>",
-      
-      // 2. Clear out the placeholder tag and send directly to your personal email
-      to: ["Bryan.s.martz@gmail.com"],
-      
-      subject: `⚓ Daily Brief — ${record.forecast_date}`,
-      html: buildEmailHtml(record),
-    });
+  const { data, error } = await resend.emails.send({
+    from: "Tactical Offshore <onboarding@resend.dev>",
+    to: ["Bryan.s.martz@gmail.com"],
+    subject: `⚓ Daily Brief — ${record.forecast_date}`,
+    html: buildEmailHtml(record),
+  });
 
-    if (error) {
-        throw new Error(`Resend email failed: ${JSON.stringify(error)}`);
-      }
-      
-      return data || {};
-    }
+  if (error) {
+    throw new Error(`Resend email failed: ${JSON.stringify(error)}`);
+  }
+  
+  return data || {};
+}
 
 // ─── Environment Validation ───────────────────────────────────────────────────
 
@@ -447,8 +454,7 @@ export default async function handler(
     });
     console.log("[brief] LLM synthesis complete.");
 
-    // 4. Assemble the full database record — transit fields from local
-    //    calculation are authoritative and override any LLM values.
+    // 4. Assemble the full database record
     const record: DailyBriefRecord = {
       forecast_date: forecastDate,
       ...llmFields,
