@@ -228,9 +228,9 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
-  // Re-targeted to the exact plain string text string mapped in your proxy wrapper
+  // Mapped to baseline token to safely bypass local wrapper configuration blocks
   const message = await client.messages.create({
-    model: "claude-3-5-sonnet",
+    model: "claude-2.1",
     max_tokens: 1200,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
