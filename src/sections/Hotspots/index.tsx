@@ -205,7 +205,7 @@ export default function Hotspots() {
               <div className="flex items-start justify-between">
                 <div>
                   <h3 className="font-semibold text-white flex items-center gap-2">
-                    {h.title}
+                    {h.distanceLabel ?? h.title}
                     {h.isDynamic && (
                       <span className="text-[9px] font-bold bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded uppercase tracking-wide">
                         DYNAMIC

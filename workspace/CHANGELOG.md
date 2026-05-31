@@ -18,6 +18,25 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-30 (Plan Step 4/4 — Hotspot card list uses distanceLabel as heading)
+- `src/sections/Hotspots/index.tsx`: card `<h3>` now renders `h.distanceLabel ?? h.title` — matches map marker label exactly
+- Cards now read "14NM SE of Hudson • DYNAMIC" instead of the raw canyon title
+- All 4 plan steps complete: distanceLabel field → compute → map label → card list
+
+## 2026-05-30 (Plan Step 3/4 — buildLabelIcon uses distanceLabel as leading segment)
+- `src/components/FishingMap.tsx`: `buildLabelIcon` now reads `h.distanceLabel ?? h.title.split(" ")[0]` as leading text
+- Map labels now read "14NM SE of Hudson • 72°F • 85%" instead of "Hudson • 72°F • 85%"
+- `iconAnchor` x widened 80→100 to accommodate longer distance+bearing prefix
+- Dynamic hotspots already had full "14NM ENE of Hudson Canyon" in their `distanceLabel` — no special-casing needed
+- Step 4 remaining: mirror the same label change in the Hotspots section card list
+
+## 2026-05-30 (Plan Step 2/4 — Populate distanceLabel when building display objects)
+- `src/components/FishingMap.tsx`: added `computeDistanceLabel(h: HotspotDef)` — finds nearest CANYONS entry by haversineNm, computes bearing → toCardinal, returns "14NM SE of Hudson" (or bare name if < 5 NM)
+- `defToDisplay()` now sets `distanceLabel: computeDistanceLabel(h)` on every placeholder HotspotDisplay
+- Live ERDDAP fetch path also sets `distanceLabel: computeDistanceLabel(h)` on resolved display objects
+- Dynamic hotspot candidates set `distanceLabel: title` since their title is already in "14NM ENE of Hudson Canyon" format
+- Next step (3/4): update buildLabelIcon to use distanceLabel as the leading label segment
+
 ## 2026-05-30 (Fix SST mismatch — last-valid treated as fallback, stale warning in click popup)
 - `src/components/FishingMap.tsx`: hotspot fetch now flags `usingFallback=true` when `hotResult.dataset === "last-valid"` — stale ERDDAP cache hits no longer shown as live hotspot SST (was root cause of 72°F vs 65°F mismatch at Norfolk)
 - Click popup now detects `result.dataset === "last-valid"` and shows "⚠ 72.0°F (stale)" + "Last valid satellite pass: May 29, 10:30 AM — current coverage unavailable" instead of a clean live reading

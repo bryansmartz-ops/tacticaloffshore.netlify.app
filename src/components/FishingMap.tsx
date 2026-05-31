@@ -55,6 +55,12 @@ export interface HotspotDisplay {
   isDynamic?: boolean;
   /** Name of the anchor canyon this dynamic hotspot was detected relative to. */
   anchorTitle?: string;
+  /**
+   * Pre-computed distance + bearing label: "14NM SE of Hudson" for fixed hotspots,
+   * already baked into `title` for dynamic hotspots (so this mirrors title leading segment).
+   * Used by buildLabelIcon and the Hotspots card list as the leading display segment.
+   */
+  distanceLabel?: string;
 }
 
 export interface FishingMapProps {
@@ -306,6 +312,31 @@ function buildHotspotPopupHtml(
 }
 
 // ---------------------------------------------------------------------------
+// Compute a "XXnm CARD of ShortName" distance label for a fixed hotspot def.
+// Uses the CANYONS array (same positions used for map labels) to find the
+// nearest named feature and report distance + cardinal direction from it.
+// Falls back to the first word of the def title when no CANYONS entry is close.
+// ---------------------------------------------------------------------------
+function computeDistanceLabel(h: HotspotDef): string {
+  // Find the closest CANYONS entry by straight-line distance
+  let bestName = h.title.split(" ")[0];
+  let bestDist = Infinity;
+  let bestBrng = 0;
+  for (const c of CANYONS) {
+    const d = haversineNm(c.lat, c.lng, h.lat, h.lng);
+    if (d < bestDist) {
+      bestDist = d;
+      bestBrng = bearingDeg(c.lat, c.lng, h.lat, h.lng);
+      bestName = c.name;
+    }
+  }
+  const nm = Math.round(bestDist);
+  // If the break IS essentially at the canyon (< 5 NM), just name it
+  if (nm < 5) return `${bestName}`;
+  return `${nm}NM ${toCardinal(bestBrng)} of ${bestName}`;
+}
+
+// ---------------------------------------------------------------------------
 // Build a fallback HotspotDisplay from a HotspotDef (no live data yet).
 // isFallbackSst is TRUE — these are INITIAL placeholders only.
 // After all ERDDAP fetches complete, any entry still marked isFallbackSst
@@ -320,6 +351,7 @@ function defToDisplay(h: HotspotDef): HotspotDisplay {
   return {
     id: h.id,
     title: h.title,
+    distanceLabel: computeDistanceLabel(h),
     confidence: Math.max(0, rawConf), // no penalty — will be excluded if still fallback after fetch
     sstTemp: h.fallbackSstF,
     breakDelta,
@@ -466,6 +498,9 @@ async function scanDynamicBreaks(
     candidates.push({
       id: dynDef.id,
       title,
+      // Dynamic hotspot: title IS already "14NM ENE of Hudson Canyon" —
+      // mirror it directly so distanceLabel is always set.
+      distanceLabel: title,
       confidence,
       sstTemp: warmPt.tempF,
       breakDelta,
@@ -595,6 +630,7 @@ export default function FishingMap({
         const display: HotspotDisplay = {
           id: h.id,
           title: h.title,
+          distanceLabel: computeDistanceLabel(h),
           confidence: rawConf,
           sstTemp: hotF,
           breakDelta,
@@ -947,12 +983,13 @@ export default function FishingMap({
   }
 
   function buildLabelIcon(h: HotspotDisplay, color: string): L.DivIcon {
-    // Short name (first word only for canyon names like "Hudson Canyon Rip" → "Hudson")
-    const shortName = h.title.split(" ")[0];
+    // Use distanceLabel ("14NM SE of Hudson") when available, else fall back to
+    // the first word of title so the marker always has a readable leading segment.
+    const leading = h.distanceLabel ?? h.title.split(" ")[0];
     return L.divIcon({
       className: "",
-      html: `<div style="display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;opacity:0.9"></span><span style="color:#e2e8f0;font-size:11px;font-weight:600;text-shadow:0 0 4px #000,0 0 8px #000,1px 1px 2px #000">${shortName} • ${h.sstTemp.toFixed(0)}°F • ${h.confidence}%</span></div>`,
-      iconAnchor: [80, -12],
+      html: `<div style="display:flex;align-items:center;gap:4px;pointer-events:none;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color};flex-shrink:0;opacity:0.9"></span><span style="color:#e2e8f0;font-size:11px;font-weight:600;text-shadow:0 0 4px #000,0 0 8px #000,1px 1px 2px #000">${leading} • ${h.sstTemp.toFixed(0)}°F • ${h.confidence}%</span></div>`,
+      iconAnchor: [100, -12],
     });
   }
 
