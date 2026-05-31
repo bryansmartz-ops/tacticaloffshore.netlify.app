@@ -56,8 +56,8 @@ interface DailyBriefRecord extends LlmFields {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// Bulletproof Public Marine Bulletin URL for the Mid-Atlantic offshore waters
-const NWS_OFFSHORE_BULLETIN_URL = "https://tgftp.nws.noaa.gov/data/forecasts/marine/coastal/an/cwfphi.txt" as const;
+// Bulletproof Marine Open-Meteo API targeting your offshore grid coordinates
+const MARINE_WEATHER_URL = "https://marine-api.open-meteo.com/v1/marine?latitude=37.65&longitude=-74.80&hourly=wave_height,wave_period,wind_speed_10m,wind_direction_10m&length_unit=ft&wind_speed_unit=kn&timezone=America%2FNew_York&forecast_days=1" as const;
 
 const ERDDAP_URL = [
   "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.json",
@@ -116,30 +116,32 @@ function calculateTransitTimes(): TransitTimes {
 
 // ─── Data Fetchers ────────────────────────────────────────────────────────────
 
-async function fetchNWSForecast(): Promise<string> {
-  const res = await fetch(NWS_OFFSHORE_BULLETIN_URL, {
-    headers: { "User-Agent": `TacticalOffshore/1.0 (${RECIPIENT_EMAIL})` },
-  });
+async function fetchMarineWeather(): Promise<string> {
+  const res = await fetch(MARINE_WEATHER_URL);
 
   if (!res.ok) {
-    throw new Error(`NWS Marine Text Bulletin failed with status ${res.status}`);
+    throw new Error(`Marine Weather API failed with status ${res.status}`);
   }
 
-  const rawText = await res.text();
-  if (!rawText || rawText.trim().length === 0) {
-    throw new Error("NWS Marine Bulletin text returned an empty document block.");
+  const data = await res.json() as any;
+  const hourly = data?.hourly;
+
+  if (!hourly || !hourly.time) {
+    throw new Error("Failed to extract hourly marine timelines from Weather API.");
   }
 
-  // Parse out the text sections relative to the Mid-Atlantic and specific canyons
-  if (rawText.includes("ANZ655") || rawText.includes("Fenwick Island")) {
-    const lines = rawText.split("\n");
-    const startIndex = lines.findIndex(l => l.includes("ANZ655") || l.includes("Fenwick Island"));
-    if (startIndex !== -1) {
-      return lines.slice(startIndex, startIndex + 50).join("\n");
-    }
-  }
+  // Pull samples at 6:00 AM, 12:00 PM, and 4:00 PM to profile your day on the water
+  const indices = [6, 12, 16];
+  const summaryBlocks = indices.map(i => {
+    const timeLabel = hourly.time[i] ? new Date(hourly.time[i]).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : `${i}:00`;
+    const height = hourly.wave_height?.[i] ?? "N/A";
+    const period = hourly.wave_period?.[i] ?? "N/A";
+    const speed = hourly.wind_speed_10m?.[i] ?? "N/A";
+    const dir = hourly.wind_direction_10m?.[i] ?? "N/A";
+    return `[Time: ${timeLabel}] Waves: ${height}ft @ ${period}s | Wind: ${speed}kts from ${dir}°`;
+  });
 
-  return rawText.slice(0, 2500);
+  return summaryBlocks.join("\n");
 }
 
 async function fetchERDDAPSst(): Promise<SstData> {
@@ -181,11 +183,11 @@ async function fetchERDDAPSst(): Promise<SstData> {
 // ─── LLM Synthesis ────────────────────────────────────────────────────────────
 
 async function synthesizeWithClaude({
-  nwsForecast,
+  weatherForecast,
   sstData,
   transitTimes,
 }: {
-  nwsForecast: string;
+  weatherForecast: string;
   sstData: SstData;
   transitTimes: TransitTimes;
 }): Promise<LlmFields> {
@@ -199,8 +201,8 @@ Always respond with valid JSON only. No markdown fences, no commentary.`;
   const userPrompt = `Generate a daily offshore fishing brief JSON object using ONLY the data below.
 Today's date: ${new Date().toISOString().split("T")[0]}
 
-=== NWS MARINE FORECAST TEXT (OFFSHORE SECTOR) ===
-${nwsForecast}
+=== METEOROLOGICAL MARINE METRICS ===
+${weatherForecast}
 
 === SST DATA (Mid-Atlantic Canyons, MUR Analysis) ===
 ${sstData.rawSummary}
@@ -217,10 +219,10 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "shelf_temp": "e.g. '71.2°F'",
   "canyon_wall_temp": "e.g. '74.8°F' — infer warmer wall from SST gradient if present",
   "break_zone_description": "location/quality of the thermal break based on SST spread",
-  "altimetry_currents": "describe likely current direction/strength inferred from SST pattern and NWS data",
-  "wind_forecast": "concise wind summary from NWS data",
-  "sea_state": "wave height and period from NWS data",
-  "barometric_pressure": "pressure trend if mentioned, else 'Not reported'",
+  "altimetry_currents": "describe likely current direction/strength inferred from SST pattern and wind direction data",
+  "wind_forecast": "concise wind summary derived from speed and angles provided",
+  "sea_state": "wave height and intervals profile from metrics data",
+  "barometric_pressure": "Not reported",
   "operational_warning": "any safety or operational concern, or null if none",
   "trolling_spread": "recommended lure/bait spread for current SST and season (late May/early June Mid-Atlantic)",
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
@@ -409,10 +411,10 @@ export default async function handler(
     const forecastDate = new Date().toISOString().split("T")[0];
     console.log(`[brief] Starting daily brief for ${forecastDate}`);
 
-    // 1. Fetch all data sources in parallel
-    console.log("[brief] Fetching NWS forecast and ERDDAP SST...");
-    const [nwsForecast, sstData] = await Promise.all([
-      fetchNWSForecast(),
+    // 1. Fetch all data sources in parallel (Swapped NWS for stable Open-Meteo)
+    console.log("[brief] Fetching Marine Weather Metrics and ERDDAP SST...");
+    const [weatherForecast, sstData] = await Promise.all([
+      fetchMarineWeather(),
       fetchERDDAPSst(),
     ]);
     console.log("[brief] Data fetch complete.");
@@ -424,7 +426,7 @@ export default async function handler(
     // 3. Synthesize with Claude
     console.log("[brief] Sending to Claude for synthesis...");
     const llmFields = await synthesizeWithClaude({
-      nwsForecast,
+      weatherForecast,
       sstData,
       transitTimes,
     });
