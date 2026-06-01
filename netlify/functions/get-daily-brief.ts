@@ -230,7 +230,7 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
 
   // Locked into the exact un-versioned cloud bridge text target
   const message = await client.messages.create({
-    model: "claude-3-5-sonnet",
+    model: "claude-3-haiku-20240307",
     max_tokens: 1200,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
