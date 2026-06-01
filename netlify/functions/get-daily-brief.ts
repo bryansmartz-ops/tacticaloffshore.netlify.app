@@ -484,4 +484,5 @@ export default async function handler(
 
 export const config: Config = {
   schedule: "0 8 * * *", // 08:00 UTC = 4:00 AM Eastern Time (EDT)
+  timeout: 60,           // Extends runtime window to 60 seconds to absorb slow NOAA data fetches
 };
