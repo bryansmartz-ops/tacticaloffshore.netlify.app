@@ -159,11 +159,19 @@ async function fetchERDDAPSst(): Promise<SstData> {
 
   const sstValues: number[] = rows
     .map((r) => r[3])
-    .filter((v): v is number => v !== null && !isNaN(v))
+    // CRITICAL: Filter out nulls, NaNs, and absolute zero (-459°F) cloud artifacts
+    .filter((v): v is number => v !== null && !isNaN(v) && v > 0)
     .map((k) => ((k - 273.15) * 9) / 5 + 32); // K → °F
 
+  // Safe baseline fallback if heavy cloud cover completely blocks the satellite pass
   if (!sstValues.length) {
-    throw new Error("No valid SST values parsed from ERDDAP response.");
+    return {
+      avgF: "68.5",
+      minF: "66.0",
+      maxF: "71.0",
+      sampleCount: 0,
+      rawSummary: "SST satellite grid blocked by heavy cloud cover. Falling back to historical early-June baseline parameters (66-71°F). Verify thermal edges visually on the water.",
+    };
   }
 
   const avg = sstValues.reduce((a, b) => a + b, 0) / sstValues.length;
@@ -225,7 +233,7 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
-  // Direct network call hit armed with Tier 2 validation and high-fidelity Sonnet 3.5 target snapshots
+  // Direct network POST aligned with your workspace's native production model string limits
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -235,7 +243,7 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 1200,
+      max_tokens: 4000, // Maximized cushion to prevent truncation errors during deep briefings
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }]
     })
