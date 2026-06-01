@@ -225,7 +225,7 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
-  // Completely bypassing SDK middleware to route directly to native Anthropic servers
+  // Direct network call to bypass intercept frameworks and pass a Tier 1 active model identifier
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -234,7 +234,7 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
       "anthropic-version": "2023-06-01"
     },
     body: JSON.stringify({
-      model: "claude-3-5-sonnet-20241022",
+      model: "claude-3-haiku-20240307",
       max_tokens: 1200,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }]
