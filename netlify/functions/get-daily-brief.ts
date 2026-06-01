@@ -144,47 +144,61 @@ async function fetchGlobalWeather(): Promise<string> {
 }
 
 async function fetchERDDAPSst(): Promise<SstData> {
-  const res = await fetch(ERDDAP_URL);
-
-  if (!res.ok) {
-    throw new Error(`ERDDAP error ${res.status}: ${res.statusText}`);
-  }
-
-  const data = (await res.json()) as ErddapResponse;
-  const rows = data?.table?.rows ?? [];
-
-  if (!rows.length) {
-    throw new Error("ERDDAP returned no SST rows.");
-  }
-
-  const sstValues: number[] = rows
-    .map((r) => r[3])
-    // CRITICAL: Filter out nulls, NaNs, and any cloud/sensor anomalies below 35°F (275 Kelvin)
-    .filter((v): v is number => v !== null && !isNaN(v) && v > 275)
-    .map((k) => ((k - 273.15) * 9) / 5 + 32); // K → °F
-
-  // Safe baseline fallback if heavy cloud cover completely blocks the satellite pass
-  if (!sstValues.length) {
-    return {
-      avgF: "68.5",
-      minF: "66.0",
-      maxF: "71.0",
-      sampleCount: 0,
-      rawSummary: "SST satellite grid blocked by heavy cloud cover. Falling back to historical early-June baseline parameters (66-71°F). Verify thermal edges visually on the water.",
-    };
-  }
-
-  const avg = sstValues.reduce((a, b) => a + b, 0) / sstValues.length;
-  const min = Math.min(...sstValues);
-  const max = Math.max(...sstValues);
-
-  return {
-    avgF: avg.toFixed(1),
-    minF: min.toFixed(1),
-    maxF: max.toFixed(1),
-    sampleCount: sstValues.length,
-    rawSummary: `SST range ${min.toFixed(1)}–${max.toFixed(1)}°F, avg ${avg.toFixed(1)}°F across ${sstValues.length} grid points (Lat 37.40–37.87, Lon -76.00 to -72.00)`,
+  // Safe baseline fallback structure if the government server is completely down or timing out
+  const fallbackData: SstData = {
+    avgF: "68.5",
+    minF: "66.0",
+    maxF: "71.0",
+    sampleCount: 0,
+    rawSummary: "SST satellite server (NOAA ERDDAP) is temporarily offline or timing out. Falling back to historical early-June baseline parameters (66-71°F). Verify thermal edges visually on the water.",
   };
+
+  try {
+    // Set up an explicit 5-second network boundary abort controller so NOAA can't hang our entire function
+    const controller = new AbortController();
+    const abortTimeoutId = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(ERDDAP_URL, { signal: controller.signal });
+    clearTimeout(abortTimeoutId);
+
+    if (!res.ok) {
+      console.warn(`[brief] NOAA ERDDAP responded with status ${res.status}. Using historical baseline.`);
+      return fallbackData;
+    }
+
+    const data = (await res.json()) as ErddapResponse;
+    const rows = data?.table?.rows ?? [];
+
+    if (!rows.length) {
+      console.warn("[brief] NOAA ERDDAP returned empty rows. Using historical baseline.");
+      return fallbackData;
+    }
+
+    const sstValues: number[] = rows
+      .map((r) => r[3])
+      // CRITICAL: Filter out nulls, NaNs, and any cloud/sensor anomalies below 35°F (275 Kelvin)
+      .filter((v): v is number => v !== null && !isNaN(v) && v > 275)
+      .map((k) => ((k - 273.15) * 9) / 5 + 32); // K → °F
+
+    if (!sstValues.length) {
+      return fallbackData;
+    }
+
+    const avg = sstValues.reduce((a, b) => a + b, 0) / sstValues.length;
+    const min = Math.min(...sstValues);
+    const max = Math.max(...sstValues);
+
+    return {
+      avgF: avg.toFixed(1),
+      minF: min.toFixed(1),
+      maxF: max.toFixed(1),
+      sampleCount: sstValues.length,
+      rawSummary: `SST range ${min.toFixed(1)}–${max.toFixed(1)}°F, avg ${avg.toFixed(1)}°F across ${sstValues.length} grid points (Lat 37.40–37.87, Lon -76.00 to -72.00)`,
+    };
+  } catch (err) {
+    console.warn("[brief] NOAA ERDDAP fetch timed out or failed network routing. Diverting to baseline overlay:", err);
+    return fallbackData;
+  }
 }
 
 // ─── LLM Synthesis ────────────────────────────────────────────────────────────
@@ -430,7 +444,7 @@ export default async function handler(
     const forecastDate = new Date().toISOString().split("T")[0];
     console.log(`[brief] Starting daily brief for ${forecastDate}`);
 
-    // 1. Fetch data sources from the unrestricted global weather network grid
+    // 1. Fetch data sources asynchronously 
     console.log("[brief] Fetching Global Weather Vectors and ERDDAP SST...");
     const [weatherForecast, sstData] = await Promise.all([
       fetchGlobalWeather(),
