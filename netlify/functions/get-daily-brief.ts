@@ -234,7 +234,7 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
       "anthropic-version": "2023-06-01"
     },
     body: JSON.stringify({
-      model: "claude-3-5-sonnet-latest",
+      model: "claude-3-5-sonnet-20240620", // The foundational snapshot tag for intercepted proxy mirrors
       max_tokens: 1200,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }]
