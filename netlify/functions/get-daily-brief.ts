@@ -5,7 +5,6 @@
 import type { Config, Context } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
-import Anthropic from "@anthropic-ai/sdk";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -191,8 +190,6 @@ async function synthesizeWithClaude({
   sstData: SstData;
   transitTimes: TransitTimes;
 }): Promise<LlmFields> {
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
   const systemPrompt = `You are a professional offshore fishing report writer specializing in Mid-Atlantic canyon fishing (Washington Canyon to Poorman's Canyon).
 You produce concise, tactical, data-driven fishing briefs for experienced captains.
 Your tone is professional but direct — think coast guard briefing meets experienced mate's log.
@@ -228,25 +225,38 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
-  // Locked into the exact un-versioned cloud bridge text target
-  const message = await client.messages.create({
-    model: "claude-3-haiku-20240307",
-    max_tokens: 1200,
-    system: systemPrompt,
-    messages: [{ role: "user", content: userPrompt }],
+  // Completely bypassing SDK middleware to route directly to native Anthropic servers
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": process.env.ANTHROPIC_API_KEY!,
+      "anthropic-version": "2023-06-01"
+    },
+    body: JSON.stringify({
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 1200,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userPrompt }]
+    })
   });
 
-  const firstBlock = message.content[0];
-  const raw = firstBlock?.type === "text" ? firstBlock.text.trim() : null;
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Direct Anthropic API call failed: status ${response.status} - ${errorText}`);
+  }
+
+  const result = await response.json() as any;
+  const raw = result?.content?.[0]?.text?.trim() || null;
 
   if (!raw) {
-    throw new Error("Claude returned an empty response.");
+    throw new Error("Direct Anthropic call returned an empty content block.");
   }
 
   try {
     return JSON.parse(raw) as LlmFields;
   } catch {
-    throw new Error(`Claude response was not valid JSON:\n${raw}`);
+    throw new Error(`Anthropic response was not valid JSON:\n${raw}`);
   }
 }
 
@@ -424,8 +434,8 @@ export default async function handler(
     const transitTimes = calculateTransitTimes();
     console.log("[brief] Transit times calculated:", transitTimes);
 
-    // 3. Synthesize with Claude
-    console.log("[brief] Sending to Claude for synthesis...");
+    // 3. Synthesize with Claude via raw HTTP fetch
+    console.log("[brief] Sending direct HTTP POST to Anthropic servers...");
     const llmFields = await synthesizeWithClaude({
       weatherForecast,
       sstData,
