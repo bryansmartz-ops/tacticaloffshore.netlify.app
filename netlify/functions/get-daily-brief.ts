@@ -228,9 +228,9 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
-  // Updated with the required provider prefix to unlock the aggregator proxy route
+  // Locked into the exact un-versioned cloud bridge text target
   const message = await client.messages.create({
-    model: "anthropic/claude-3.5-sonnet",
+    model: "claude-3-5-sonnet",
     max_tokens: 1200,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
