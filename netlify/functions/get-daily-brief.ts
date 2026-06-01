@@ -234,7 +234,7 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
       "anthropic-version": "2023-06-01"
     },
     body: JSON.stringify({
-      model: "claude-3-5-sonnet-20240620", // The foundational snapshot tag for intercepted proxy mirrors
+      model: "claude-3-5-sonnet-20241022",
       max_tokens: 1200,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }]
@@ -379,7 +379,7 @@ async function sendEmail(record: DailyBriefRecord): Promise<{ id?: string }> {
   
   const { data, error } = await resend.emails.send({
     from: "Tactical Offshore <onboarding@resend.dev>",
-    to: ["Bryan.s.martz@gmail.com"],
+    to: [RECIPIENT_EMAIL],
     subject: `⚓ Daily Brief — ${record.forecast_date}`,
     html: buildEmailHtml(record),
   });
