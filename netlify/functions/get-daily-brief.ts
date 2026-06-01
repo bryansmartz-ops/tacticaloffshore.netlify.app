@@ -159,8 +159,8 @@ async function fetchERDDAPSst(): Promise<SstData> {
 
   const sstValues: number[] = rows
     .map((r) => r[3])
-    // CRITICAL: Filter out nulls, NaNs, and absolute zero (-459°F) cloud artifacts
-    .filter((v): v is number => v !== null && !isNaN(v) && v > 0)
+    // CRITICAL: Filter out nulls, NaNs, and any cloud/sensor anomalies below 35°F (275 Kelvin)
+    .filter((v): v is number => v !== null && !isNaN(v) && v > 275)
     .map((k) => ((k - 273.15) * 9) / 5 + 32); // K → °F
 
   // Safe baseline fallback if heavy cloud cover completely blocks the satellite pass
