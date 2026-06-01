@@ -154,9 +154,9 @@ async function fetchERDDAPSst(): Promise<SstData> {
   };
 
   try {
-    // Set up an explicit 5-second network boundary abort controller so NOAA can't hang our entire function
+    // Give NOAA 25 seconds to resolve its morning lag before abandoning the fetch
     const controller = new AbortController();
-    const abortTimeoutId = setTimeout(() => controller.abort(), 5000);
+    const abortTimeoutId = setTimeout(() => controller.abort(), 25000);
 
     const res = await fetch(ERDDAP_URL, { signal: controller.signal });
     clearTimeout(abortTimeoutId);
