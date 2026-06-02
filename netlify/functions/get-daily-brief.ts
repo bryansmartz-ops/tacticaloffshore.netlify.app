@@ -265,15 +265,14 @@ export default async function handler(req: Request, context: Context): Promise<R
     const forecastDate = new Date().toISOString().split("T")[0];
     console.log(`[brief] Assembling daily brief from cache row for ${forecastDate}`);
 
-    // 1. Fetch the unified cache container row using an array limit safety net
+    // 1. Fetch the absolute top row in the cache container regardless of string matching matching typos
     const { data: cacheArray, error: cacheError } = await supabase
       .from("ocean_data_cache")
       .select("*")
-      .eq("id", "mid_atlantic_canyons")
       .limit(1);
 
     if (cacheError || !cacheArray || cacheArray.length === 0) {
-      throw new Error(`Failed to retrieve environmental data cache: ${cacheError?.message || 'Cache row missing'}`);
+      throw new Error(`Failed to retrieve environmental data cache: ${cacheError?.message || 'Cache table is completely empty'}`);
     }
 
     const cache = cacheArray[0]; // Safely pull out our single state object
