@@ -265,16 +265,18 @@ export default async function handler(req: Request, context: Context): Promise<R
     const forecastDate = new Date().toISOString().split("T")[0];
     console.log(`[brief] Assembling daily brief from cache row for ${forecastDate}`);
 
-    // 1. Fetch the unified cache container row
-    const { data: cache, error: cacheError } = await supabase
+    // 1. Fetch the unified cache container row using an array limit safety net
+    const { data: cacheArray, error: cacheError } = await supabase
       .from("ocean_data_cache")
       .select("*")
       .eq("id", "mid_atlantic_canyons")
-      .single();
+      .limit(1);
 
-    if (cacheError || !cache) {
-      throw new Error(`Failed to retrieve environmental data cache: ${cacheError?.message}`);
+    if (cacheError || !cacheArray || cacheArray.length === 0) {
+      throw new Error(`Failed to retrieve environmental data cache: ${cacheError?.message || 'Cache row missing'}`);
     }
+
+    const cache = cacheArray[0]; // Safely pull out our single state object
 
     // 2. Parse Weather JSON block into human-readable strings for Claude
     let weatherText = "Weather Cache Empty.";
