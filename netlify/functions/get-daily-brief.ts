@@ -29,6 +29,8 @@ interface LlmFields {
   operational_warning: string | null;
   trolling_spread: string;
   sonar_strategy: string;
+  primary_target_zone: string;    // Added Lat/Long & Loran targets
+  secondary_target_zone: string;  // Added Lat/Long & Loran targets
 }
 
 interface DailyBriefRecord extends LlmFields {
@@ -131,7 +133,9 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "barometric_pressure": "surface pressure trends if logged in metrics, else 'Not reported'",
   "operational_warning": "any safety or operational concern, or null if none",
   "trolling_spread": "recommended lure/bait spread for current SST and season (late May/early June Mid-Atlantic)",
-  "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
+  "sonar_strategy": "depth range to target, structure to look for, temperature break approach",
+  "primary_target_zone": "Provide specific high-confidence coordinates for the primary temperature break or pocket inside this canyon block. Format with explicit Lat/Long and corresponding estimated Loran-C time delay numbers (e.g., 27100 / 43000 chains) suited for Mid-Atlantic plots.",
+  "secondary_target_zone": "Provide alternative high-confidence coordinate numbers if the primary zone has heavy traffic or if the thermal break pushes. Format with explicit Lat/Long and Loran-C breakdowns."
 }`;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -176,6 +180,7 @@ async function writeToSupabase(record: DailyBriefRecord): Promise<{ id: string }
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
+  // NOTE: Ensure your 'daily_briefs' table contains 'primary_target_zone' and 'secondary_target_zone' text columns
   const { data, error } = await supabase
     .from("daily_briefs")
     .insert([record])
@@ -212,6 +217,13 @@ function buildEmailHtml(record: DailyBriefRecord): string {
     <div style="padding:24px 32px;">
       <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">Environmental Overview</h2>
       <p style="margin:0 0 24px;line-height:1.7;color:#cbd5e1;">${record.environmental_summary}</p>
+      
+      <h2 style="color:#f59e0b;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">🎯 High-Confidence Coordinates</h2>
+      <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:24px;">
+        ${row("Primary Waypoint", record.primary_target_zone)}
+        ${row("Secondary Waypoint", record.secondary_target_zone)}
+      </table>
+
       <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">Water Conditions</h2>
       <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:24px;">
         ${row("Shelf Temp", record.shelf_temp)}
@@ -265,7 +277,7 @@ export default async function handler(req: Request, context: Context): Promise<R
     const forecastDate = new Date().toISOString().split("T")[0];
     console.log(`[brief] Assembling daily brief from cache row for ${forecastDate}`);
 
-    // 1. Fetch the absolute top row in the cache container regardless of string matching matching typos
+    // 1. Fetch the unified cache container row using an array limit safety net
     const { data: cacheArray, error: cacheError } = await supabase
       .from("ocean_data_cache")
       .select("*")
@@ -275,7 +287,7 @@ export default async function handler(req: Request, context: Context): Promise<R
       throw new Error(`Failed to retrieve environmental data cache: ${cacheError?.message || 'Cache table is completely empty'}`);
     }
 
-    const cache = cacheArray[0]; // Safely pull out our single state object
+    const cache = cacheArray[0];
 
     // 2. Parse Weather JSON block into human-readable strings for Claude
     let weatherText = "Weather Cache Empty.";
