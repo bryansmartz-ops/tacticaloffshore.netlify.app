@@ -26,7 +26,12 @@ async function fetchWithTimeout(url: string, options = {}, timeout = 12000) {
 
 export default async function handler(req: Request) {
   console.log("[sync] Starting 8-hour environmental data scrape...");
-  const updatePayload: any = { updated_at: new Date().toISOString() };
+  
+  // Explicitly tie this data payload to our master key slot
+  const updatePayload: any = { 
+    id: "mid_atlantic_canyons",
+    updated_at: new Date().toISOString() 
+  };
 
   // 1. Weather Data (Open-Meteo Global Model)
   try {
@@ -74,11 +79,10 @@ export default async function handler(req: Request) {
     sstFailed = true;
   }
 
-  // 3. Commit the Data Frame to your permanent state container
+  // 3. Commit the Data Frame using UPSERT to protect against empty tables
   const { error } = await SUPABASE
     .from("ocean_data_cache")
-    .update(updatePayload)
-    .eq("id", "mid_atlantic_canyons");
+    .upsert(updatePayload, { onConflict: "id" });
 
   if (error) {
     console.error("[sync] Fatal Database Cache state failure:", error.message);
@@ -90,5 +94,5 @@ export default async function handler(req: Request) {
 }
 
 export const config: Config = {
-  schedule: "0 */8 * * *", // Fires completely automatically every 8 hours
+  schedule: "0 */8 * * *", 
 };
