@@ -17,20 +17,6 @@ interface TransitTimes {
   afternoonDepartLocal: string;
 }
 
-interface SstData {
-  avgF: string;
-  minF: string;
-  maxF: string;
-  sampleCount: number;
-  rawSummary: string;
-}
-
-interface ErddapResponse {
-  table: {
-    rows: Array<[string, number, number, number | null]>;
-  };
-}
-
 interface LlmFields {
   environmental_summary: string;
   shelf_temp: string;
@@ -54,17 +40,6 @@ interface DailyBriefRecord extends LlmFields {
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-
-// Global meteorological model — 100% boundary-free coverage out to the deep canyons
-const GLOBAL_WEATHER_URL = "https://api.open-meteo.com/v1/forecast?latitude=37.65&longitude=-74.80&hourly=wind_speed_10m,wind_direction_10m,relative_humidity_2m&current=surface_pressure&wind_speed_unit=kn&timezone=America%2FNew_York&forecast_days=1" as const;
-
-const ERDDAP_URL = [
-  "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.json",
-  "?analysed_sst",
-  "[(last)]",
-  "[(37.40):(37.87)]",
-  "[(-76.00):(-72.00)]",
-].join("") as const;
 
 const PERFORMANCE = {
   outboundNm: 62,
@@ -113,103 +88,15 @@ function calculateTransitTimes(): TransitTimes {
   };
 }
 
-// ─── Data Fetchers ────────────────────────────────────────────────────────────
-
-async function fetchGlobalWeather(): Promise<string> {
-  const res = await fetch(GLOBAL_WEATHER_URL);
-
-  if (!res.ok) {
-    throw new Error(`Global Weather API failed with status ${res.status}`);
-  }
-
-  const data = await res.json() as any;
-  const hourly = data?.hourly;
-  const current = data?.current;
-
-  if (!hourly || !hourly.time) {
-    throw new Error("Failed to extract hourly metrics from Global Weather API.");
-  }
-
-  const indices = [6, 12, 16];
-  const summaryBlocks = indices.map(i => {
-    const timeLabel = hourly.time[i] ? new Date(hourly.time[i]).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : `${i}:00`;
-    const speed = hourly.wind_speed_10m?.[i] ?? "N/A";
-    const dir = hourly.wind_direction_10m?.[i] ?? "N/A";
-    const humidity = hourly.relative_humidity_2m?.[i] ?? "N/A";
-    return `[Time: ${timeLabel}] Wind: ${speed}kts from ${dir}° | Relative Humidity: ${humidity}%`;
-  });
-
-  const pressureText = current?.surface_pressure ? `\n[Current Surface Pressure] ${current.surface_pressure} hPa` : "";
-  return summaryBlocks.join("\n") + pressureText;
-}
-
-async function fetchERDDAPSst(): Promise<SstData> {
-  // Safe baseline fallback structure if the government server is completely down or timing out
-  const fallbackData: SstData = {
-    avgF: "68.5",
-    minF: "66.0",
-    maxF: "71.0",
-    sampleCount: 0,
-    rawSummary: "SST satellite server (NOAA ERDDAP) is temporarily offline or timing out. Falling back to historical early-June baseline parameters (66-71°F). Verify thermal edges visually on the water.",
-  };
-
-  try {
-    // Give NOAA 25 seconds to resolve its morning lag before abandoning the fetch
-    const controller = new AbortController();
-    const abortTimeoutId = setTimeout(() => controller.abort(), 25000);
-
-    const res = await fetch(ERDDAP_URL, { signal: controller.signal });
-    clearTimeout(abortTimeoutId);
-
-    if (!res.ok) {
-      console.warn(`[brief] NOAA ERDDAP responded with status ${res.status}. Using historical baseline.`);
-      return fallbackData;
-    }
-
-    const data = (await res.json()) as ErddapResponse;
-    const rows = data?.table?.rows ?? [];
-
-    if (!rows.length) {
-      console.warn("[brief] NOAA ERDDAP returned empty rows. Using historical baseline.");
-      return fallbackData;
-    }
-
-    const sstValues: number[] = rows
-      .map((r) => r[3])
-      // CRITICAL: Filter out nulls, NaNs, and any cloud/sensor anomalies below 35°F (275 Kelvin)
-      .filter((v): v is number => v !== null && !isNaN(v) && v > 275)
-      .map((k) => ((k - 273.15) * 9) / 5 + 32); // K → °F
-
-    if (!sstValues.length) {
-      return fallbackData;
-    }
-
-    const avg = sstValues.reduce((a, b) => a + b, 0) / sstValues.length;
-    const min = Math.min(...sstValues);
-    const max = Math.max(...sstValues);
-
-    return {
-      avgF: avg.toFixed(1),
-      minF: min.toFixed(1),
-      maxF: max.toFixed(1),
-      sampleCount: sstValues.length,
-      rawSummary: `SST range ${min.toFixed(1)}–${max.toFixed(1)}°F, avg ${avg.toFixed(1)}°F across ${sstValues.length} grid points (Lat 37.40–37.87, Lon -76.00 to -72.00)`,
-    };
-  } catch (err) {
-    console.warn("[brief] NOAA ERDDAP fetch timed out or failed network routing. Diverting to baseline overlay:", err);
-    return fallbackData;
-  }
-}
-
 // ─── LLM Synthesis ────────────────────────────────────────────────────────────
 
 async function synthesizeWithClaude({
-  weatherForecast,
-  sstData,
+  weatherForecastText,
+  sstSummaryText,
   transitTimes,
 }: {
-  weatherForecast: string;
-  sstData: SstData;
+  weatherForecastText: string;
+  sstSummaryText: string;
   transitTimes: TransitTimes;
 }): Promise<LlmFields> {
   const systemPrompt = `You are a professional offshore fishing report writer specializing in Mid-Atlantic canyon fishing (Washington Canyon to Poorman's Canyon).
@@ -220,11 +107,11 @@ Always respond with valid JSON only. No markdown fences, no commentary.`;
   const userPrompt = `Generate a daily offshore fishing brief JSON object using ONLY the data below.
 Today's date: ${new Date().toISOString().split("T")[0]}
 
-=== METEOROLOGICAL WINDS & LOGISTICS ===
-${weatherForecast}
+=== METEOROLOGICAL WINDS & LOGISTICS (HOURLY FROM CACHE) ===
+${weatherForecastText}
 
-=== SST DATA (Mid-Atlantic Canyons, MUR Analysis) ===
-${sstData.rawSummary}
+=== CACHED SST IMAGERY DATA ===
+${sstSummaryText}
 
 === VESSEL PERFORMANCE / TRANSIT PLAN ===
 - Outbound: ${PERFORMANCE.outboundNm} nm @ ${PERFORMANCE.outboundKts} kts → ${transitTimes.morning_run_time} run time (arrive ~${transitTimes.morningArrivalLocal})
@@ -247,7 +134,6 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   "sonar_strategy": "depth range to target, structure to look for, temperature break approach"
 }`;
 
-  // Direct network POST aligned with your workspace's native production model string limits
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -257,7 +143,7 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
     },
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
-      max_tokens: 4000, // Maximized cushion to prevent truncation errors during deep briefings
+      max_tokens: 4000,
       system: systemPrompt,
       messages: [{ role: "user", content: userPrompt }]
     })
@@ -300,10 +186,6 @@ async function writeToSupabase(record: DailyBriefRecord): Promise<{ id: string }
     throw new Error(`Supabase insert failed: ${error.message}`);
   }
 
-  if (!data) {
-    throw new Error("Supabase insert returned no data.");
-  }
-
   return data;
 }
 
@@ -323,73 +205,42 @@ function buildEmailHtml(record: DailyBriefRecord): string {
 <head><meta charset="UTF-8"><title>Daily Offshore Brief</title></head>
 <body style="margin:0;padding:0;background:#0f172a;font-family:'Segoe UI',Arial,sans-serif;color:#e2e8f0;">
   <div style="max-width:680px;margin:32px auto;background:#1e293b;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.4);">
-
     <div style="background:linear-gradient(135deg,#0c4a6e,#0369a1);padding:28px 32px;">
-      <h1 style="margin:0;font-size:22px;font-weight:700;color:#f0f9ff;letter-spacing:0.5px;">
-        ⚓ Tactical Offshore Daily Brief
-      </h1>
-      <p style="margin:6px 0 0;color:#bae6fd;font-size:14px;">
-        ${record.forecast_date} — Mid-Atlantic Canyons
-      </p>
+      <h1 style="margin:0;font-size:22px;font-weight:700;color:#f0f9ff;letter-spacing:0.5px;">⚓ Tactical Offshore Daily Brief</h1>
+      <p style="margin:6px 0 0;color:#bae6fd;font-size:14px;">${record.forecast_date} — Mid-Atlantic Canyons</p>
     </div>
-
     <div style="padding:24px 32px;">
-      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">
-        Environmental Overview
-      </h2>
+      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">Environmental Overview</h2>
       <p style="margin:0 0 24px;line-height:1.7;color:#cbd5e1;">${record.environmental_summary}</p>
-
-      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">
-        Water Conditions
-      </h2>
+      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">Water Conditions</h2>
       <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:24px;">
         ${row("Shelf Temp", record.shelf_temp)}
         ${row("Canyon Wall Temp", record.canyon_wall_temp)}
         ${row("Thermal Break", record.break_zone_description)}
         ${row("Altimetry / Currents", record.altimetry_currents)}
       </table>
-
-      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">
-        Weather
-      </h2>
+      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">Weather</h2>
       <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:24px;">
         ${row("Wind", record.wind_forecast)}
         ${row("Sea State", record.sea_state)}
         ${row("Barometric Pressure", record.barometric_pressure)}
       </table>
-
-      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">
-        Transit Plan
-      </h2>
+      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">Transit Plan</h2>
       <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:24px;">
         ${row("Morning Run", record.morning_run_time)}
         ${row("Troll Time", record.total_troll_time)}
         ${row("Afternoon Run", record.afternoon_run_time)}
         ${row("Total Day", record.total_day_duration)}
       </table>
-
-      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">
-        Tactical
-      </h2>
+      <h2 style="color:#38bdf8;font-size:15px;text-transform:uppercase;letter-spacing:1px;margin:0 0 12px;">Tactical</h2>
       <table style="width:100%;border-collapse:collapse;background:#0f172a;border-radius:8px;overflow:hidden;margin-bottom:24px;">
         ${row("Trolling Spread", record.trolling_spread)}
         ${row("Sonar Strategy", record.sonar_strategy)}
       </table>
-
-      ${
-        record.operational_warning
-          ? `<div style="background:#7c1d1d;border-left:4px solid #ef4444;padding:14px 18px;border-radius:6px;margin-bottom:24px;">
-               <strong style="color:#fca5a5;">⚠ Operational Warning</strong>
-               <p style="margin:6px 0 0;color:#fecaca;">${record.operational_warning}</p>
-             </div>`
-          : ""
-      }
+      ${record.operational_warning ? `<div style="background:#7c1d1d;border-left:4px solid #ef4444;padding:14px 18px;border-radius:6px;margin-bottom:24px;"><strong style="color:#fca5a5;">⚠ Operational Warning</strong><p style="margin:6px 0 0;color:#fecaca;">${record.operational_warning}</p></div>` : ""}
     </div>
-
     <div style="padding:16px 32px;border-top:1px solid #334155;text-align:center;">
-      <p style="margin:0;font-size:12px;color:#475569;">
-        Generated by Tactical Offshore · tacticaloffshore.netlify.app
-      </p>
+      <p style="margin:0;font-size:12px;color:#475569;">Generated by Tactical Offshore · tacticaloffshore.netlify.app</p>
     </div>
   </div>
 </body>
@@ -398,74 +249,71 @@ function buildEmailHtml(record: DailyBriefRecord): string {
 
 async function sendEmail(record: DailyBriefRecord): Promise<{ id?: string }> {
   const resend = new Resend(process.env.RESEND_API_KEY);
-  
-  const { data, error } = await resend.emails.send({
+  return await resend.emails.send({
     from: "Tactical Offshore <onboarding@resend.dev>",
     to: [RECIPIENT_EMAIL],
     subject: `⚓ Daily Brief — ${record.forecast_date}`,
     html: buildEmailHtml(record),
-  });
-
-  if (error) {
-    throw new Error(`Resend email failed: ${JSON.stringify(error)}`);
-  }
-  
-  return data || {};
-}
-
-// ─── Environment Validation ───────────────────────────────────────────────────
-
-function validateEnv(): void {
-  const required = [
-    "ANTHROPIC_API_KEY",
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "RESEND_API_KEY",
-  ] as const;
-
-  const missing = required.filter((k) => !process.env[k]);
-
-  if (missing.length) {
-    throw new Error(
-      `Missing required environment variables: ${missing.join(", ")}`
-    );
-  }
+  }) as any;
 }
 
 // ─── Netlify v2 Handler ───────────────────────────────────────────────────────
 
-export default async function handler(
-  _req: Request,
-  _context: Context
-): Promise<Response> {
+export default async function handler(req: Request, context: Context): Promise<Response> {
   try {
-    validateEnv();
-
+    const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
     const forecastDate = new Date().toISOString().split("T")[0];
-    console.log(`[brief] Starting daily brief for ${forecastDate}`);
+    console.log(`[brief] Assembling daily brief from cache row for ${forecastDate}`);
 
-    // 1. Fetch data sources asynchronously 
-    console.log("[brief] Fetching Global Weather Vectors and ERDDAP SST...");
-    const [weatherForecast, sstData] = await Promise.all([
-      fetchGlobalWeather(),
-      fetchERDDAPSst(),
-    ]);
-    console.log("[brief] Data fetch complete.");
+    // 1. Fetch the unified cache container row
+    const { data: cache, error: cacheError } = await supabase
+      .from("ocean_data_cache")
+      .select("*")
+      .eq("id", "mid_atlantic_canyons")
+      .single();
 
-    // 2. Calculate transit timelines
+    if (cacheError || !cache) {
+      throw new Error(`Failed to retrieve environmental data cache: ${cacheError?.message}`);
+    }
+
+    // 2. Parse Weather JSON block into human-readable strings for Claude
+    let weatherText = "Weather Cache Empty.";
+    if (cache.weather_data?.hourly) {
+      const h = cache.weather_data.hourly;
+      const cur = cache.weather_data.current;
+      const indices = [6, 12, 16]; // 6 AM, Noon, 4 PM
+      weatherText = indices.map(i => {
+        return `[Time: ${h.time[i] || i}] Wind: ${h.wind_speed_10m?.[i]}kts from ${h.wind_direction_10m?.[i]}°`;
+      }).join("\n");
+      if (cur?.surface_pressure) {
+        weatherText += `\n[Surface Pressure] ${cur.surface_pressure} hPa`;
+      }
+    }
+
+    // 3. Formulate the SST string block, injecting metadata if the pass was cloudy
+    let sstText = "";
+    if (cache.sst_data) {
+      const sst = cache.sst_data;
+      sstText = `SST Range: ${sst.minF} to ${sst.maxF}°F, Avg: ${sst.avgF}°F across ${sst.sampleCount} sensor grids.\nSource: ${sst.source || "Satellite"}`;
+      if (cache.sst_is_fallback) {
+        sstText += `\nCRITICAL METADATA: Current satellite orbital pass is cloud-blinded. This temperature data represents the Last Known Good cloud-free window captured at local timestamp: ${cache.updated_at}. Treat these positions as a structural anchor, but cross-reference with hull readings.`;
+      }
+    } else {
+      sstText = "No successful satellite passes recorded in cache. Operating on standard early-June historical averages (66-71°F).";
+    }
+
+    // 4. Calculate performance timelines
     const transitTimes = calculateTransitTimes();
-    console.log("[brief] Transit times calculated:", transitTimes);
 
-    // 3. Synthesize with Claude via raw HTTP fetch
-    console.log("[brief] Sending direct HTTP POST to Anthropic servers...");
+    // 5. Run synthesis via Claude 4.6
+    console.log("[brief] Routing data payloads straight into Claude...");
     const llmFields = await synthesizeWithClaude({
-      weatherForecast,
-      sstData,
-      transitTimes,
+      weatherForecastText: weatherText,
+      sstSummaryText: sstText,
+      transitTimes
     });
-    console.log("[brief] LLM synthesis complete.");
 
-    // 4. Assemble the full database record
+    // 6. Compile record layout
     const record: DailyBriefRecord = {
       forecast_date: forecastDate,
       ...llmFields,
@@ -475,36 +323,24 @@ export default async function handler(
       total_day_duration: transitTimes.total_day_duration,
     };
 
-    // 5. Write to Supabase
-    console.log("[brief] Writing to Supabase...");
+    // 7. Commit record and fire email dispatch
     const savedRecord = await writeToSupabase(record);
-    console.log(`[brief] Saved record id: ${savedRecord.id}`);
-
-    // 6. Send email
-    console.log("[brief] Sending email via Resend...");
     const emailResult = await sendEmail(record);
-    console.log(`[brief] Email sent, id: ${emailResult?.id}`);
 
     return Response.json({
       success: true,
       record_id: savedRecord.id,
-      forecast_date: forecastDate,
-      email_id: emailResult?.id ?? null,
+      email_id: emailResult?.data?.id ?? null,
     });
+
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[brief] FATAL ERROR:", message);
-
-    return Response.json(
-      { success: false, error: message },
-      { status: 500 }
-    );
+    console.error("[brief] BRIEF GENERATOR FATAL ERROR:", message);
+    return Response.json({ success: false, error: message }, { status: 500 });
   }
 }
 
-// ─── Netlify Function Config ──────────────────────────────────────────────────
-
 export const config: Config = {
-  schedule: "0 8 * * *", // 08:00 UTC = 4:00 AM Eastern Time (EDT)
-  timeout: 60,           // Extends runtime window to 60 seconds to absorb slow NOAA data fetches
+  schedule: "0 8 * * *", 
+  timeout: 60,
 };
