@@ -304,7 +304,7 @@ export default function Hotspots() {
                     {
                       label: "History",
                       val: h.signals.historyReportsScore,
-                      max: 15,
+                      max: 10,
                       color: "#67e8f9",
                     },
                   ].map((r) => (
@@ -357,7 +357,7 @@ export default function Hotspots() {
                   {h.isDynamic
                     ? `Dynamic break detected offshore · ${h.anchorTitle ?? ""}`
                     : def
-                      ? `${def.idealSstF}&#176;F ideal · ${def.historyPrior}/15 history score`
+                      ? `${def.idealSstF}&#176;F ideal · ${def.historyPrior}/10 history score`
                       : ""}
                 </div>
               )}

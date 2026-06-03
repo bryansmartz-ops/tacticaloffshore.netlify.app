@@ -594,7 +594,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     minConfidence: 58, // northern shelf — softer GS breaks; slightly lower bar
     idealSstF: 70,
     siteIdealBreakDeltaF: 2.5,
-    historyPrior: 12,
+    historyPrior: 10,
   },
   // ── OC, MD / Delaware area ──────────────────────────────────────────────
   {
@@ -615,7 +615,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     minConfidence: 60,
     idealSstF: 72,
     siteIdealBreakDeltaF: 3.0,
-    historyPrior: 14,
+    historyPrior: 10,
   },
   {
     id: "7",
@@ -633,7 +633,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     minConfidence: 58,
     idealSstF: 71,
     siteIdealBreakDeltaF: 2.5,
-    historyPrior: 11,
+    historyPrior: 9,
   },
   // ── Mid-Atlantic shelf break ─────────────────────────────────────────────
   {
@@ -653,7 +653,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     minConfidence: 60,
     idealSstF: 74,
     siteIdealBreakDeltaF: 3.5,
-    historyPrior: 13,
+    historyPrior: 10,
   },
   {
     id: "5",
@@ -672,7 +672,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     minConfidence: 58,
     idealSstF: 72,
     siteIdealBreakDeltaF: 3.0,
-    historyPrior: 9,
+    historyPrior: 7,
   },
   {
     id: "1",
@@ -693,7 +693,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     minConfidence: 62,
     idealSstF: 73,
     siteIdealBreakDeltaF: 4.5,
-    historyPrior: 12,
+    historyPrior: 10,
   },
   // ── South: VA / Hatteras ─────────────────────────────────────────────────
   {
@@ -714,7 +714,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     minConfidence: 62,
     idealSstF: 71,
     siteIdealBreakDeltaF: 4.5,
-    historyPrior: 11,
+    historyPrior: 9,
   },
   {
     id: "8",
@@ -734,7 +734,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     minConfidence: 60,
     idealSstF: 76,
     siteIdealBreakDeltaF: 5.0,
-    historyPrior: 15,
+    historyPrior: 10,
   },
 ];
 

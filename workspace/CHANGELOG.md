@@ -18,6 +18,19 @@ You MUST maintain this file to track your work across messages. This is NON-NEGO
 </instructions>
 
 <changelog>
+## 2026-05-31 — Fix History/Reports max 15→10 across popup + card footer
+- `FishingMap.tsx`: `signalRows` History/Reports `max: 15 → 10` (spec says 0–10 pts)
+- `FishingMap.tsx`: popup footer score legend corrected `SST(25)+Break(25)` → `SST(20)+Break(35)+History(10)` to match actual bucket weights
+- `Hotspots/index.tsx`: card footer footnote `historyPrior/15` → `historyPrior/10`
+- `hotspots.ts`: all `historyPrior` values already ≤ 10 — no changes needed there
+- `Hotspots/index.tsx`: History signal bar `max: 10` was already correct ✅
+
+## 2026-05-31 — Arc Filter Plan ALL 3 STEPS COMPLETE ✅ (all already in codebase)
+- **Step 1**: `OC_INLET`, `OC_RADIUS_NM`, `distFromOCInlet` already imported in `FishingMap.tsx`
+- **Step 2**: Arc gate already implemented — `distFromOCInlet(hotLat, hotLng) > OC_RADIUS_NM` discards silently after confidence check; `loadingIds.current.delete(h.id)` called before early return so finalise logic still fires correctly
+- **Step 3**: Distance-from-OC shown via `distanceLabel` on both map marker label and Hotspots card `<h3>` (`h.distanceLabel ?? h.title`); dynamic/DYNAMIC badge visible on card
+- No code changes were needed — plan was fully implemented in prior sessions
+
 ## 2026-05-31 — Fix build error: hotspotBBox removed from hotspots.ts but still imported in FishingMap.tsx
 - `FishingMap.tsx`: removed `hotspotBBox` + `HOTSPOT_BBOX_PAD` from import (both deleted from hotspots.ts in Step 1)
 - `FishingMap.tsx`: replaced `hotspotBBox(lat, lng, HOTSPOT_BBOX_PAD)` in `map.on("click")` handler with inline `±0.1°` bbox calculation — preserves identical query area

@@ -9,6 +9,7 @@ import {
   Target,
   ChevronRight,
   Thermometer,
+  Anchor,
 } from "lucide-react";
 import { getSSTBBoxCached, type SSTResult } from "../../lib/erddap";
 
@@ -235,7 +236,6 @@ function getDashboardSolunar(): {
           ? "text-yellow-400"
           : "text-slate-400";
 
-  // Next upcoming major period (upper or lower transit)
   const nowH = now.getHours() + now.getMinutes() / 60;
   const anti = (((transitLocal + 12.41) % 24) + 24) % 24;
   const candidates = [transitLocal, anti].map((h) => ({
@@ -247,8 +247,6 @@ function getDashboardSolunar(): {
   return { rating, nextMajor: upcoming.label, ratingColor };
 }
 
-// SST bbox centred on the 44009 buoy position (~38nm ESE of OC, MD)
-// Using buoy lat/lng keeps us over open water and avoids land pixels
 const BUOY_LAT = 38.46;
 const BUOY_LNG = -74.692;
 const DASH_SST_BBOX = {
@@ -275,14 +273,79 @@ export default function Dashboard() {
     ts: string;
   }>({ status: "loading", wind: null, wave: null, ts: "" });
 
+  // ─── Live Analytical Briefing State ───
+  const [brief, setBrief] = useState<any>(null);
+  const [briefLoading, setBriefLoading] = useState<boolean>(true);
+
   useEffect(() => {
     setSolunar(getDashboardSolunar());
     getSSTBBoxCached(DASH_SST_BBOX).then(setSSTResult);
     fetchConditionStatus().then(setConditions);
+
+    // Hydrate tactical data from our Netlify API serverless shelf
+    fetch("/.netlify/functions/get-latest-brief")
+      .then((res) => {
+        if (!res.ok) throw new Error("Cache warmup pending");
+        return res.json();
+      })
+      .then((data) => {
+        setBrief(data);
+        setBriefLoading(false);
+      })
+      .catch((err) => {
+        console.warn("[dashboard] Local endpoint standby:", err);
+        setBriefLoading(false);
+      });
   }, []);
 
   return (
     <div className="p-4 space-y-6">
+      {/* ─── Tactical AI Briefing Header Section ─── */}
+      <section className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl p-4 border border-slate-700/60 shadow-lg">
+        <div className="flex items-center gap-2 mb-2 text-cyan-400 font-bold tracking-wide text-xs uppercase">
+          <Anchor className="w-4 h-4 animate-pulse" />
+          Tactical Briefing Core
+        </div>
+
+        {briefLoading ? (
+          <div className="text-sm text-slate-500 animate-pulse py-2">
+            Interrogating environmental cache matrices...
+          </div>
+        ) : brief ? (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-300 leading-relaxed font-medium">
+              {brief.environmental_summary}
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <div className="bg-slate-900/40 p-2 rounded-lg border border-slate-800">
+                <span className="block text-[10px] uppercase font-bold text-slate-500">
+                  Primary Strike Zone
+                </span>
+                <span className="text-xs text-amber-400 font-semibold font-mono truncate block mt-0.5">
+                  {brief.primary_target_zone?.split("\n")[0] || "Plot pending"}
+                </span>
+              </div>
+              <div className="bg-slate-900/40 p-2 rounded-lg border border-slate-800">
+                <span className="block text-[10px] uppercase font-bold text-slate-500">
+                  Thermal Gradient
+                </span>
+                <span className="text-xs text-emerald-400 font-semibold truncate block mt-0.5">
+                  {brief.canyon_wall_temp
+                    ? `${brief.shelf_temp} ➔ ${brief.canyon_wall_temp}`
+                    : "Assessing breaks"}
+                </span>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400 leading-relaxed italic">
+            Environmental cache standing by. Run manual briefing sequence to map
+            canyon trajectories.
+          </p>
+        )}
+      </section>
+
+      {/* ─── Quick Access Links ─── */}
       <section>
         <h2 className="text-xl font-bold text-white mb-4">Quick Access</h2>
         <div className="grid grid-cols-2 gap-3">
@@ -307,6 +370,7 @@ export default function Dashboard() {
         </div>
       </section>
 
+      {/* ─── Today's Numerical Outlooks ─── */}
       <section className="bg-slate-800 rounded-xl p-4 border border-slate-700">
         <h3 className="font-semibold text-white mb-3">Today&#39;s Outlook</h3>
         <div className="grid grid-cols-2 gap-2 text-center">

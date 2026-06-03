@@ -31,6 +31,9 @@ import {
   speciesFromSST,
   computeConfidence,
   buildHotspotSignals,
+  OC_INLET,
+  OC_RADIUS_NM,
+  distFromOCInlet,
 } from "../lib/hotspots";
 import type { HotspotDef, HotspotSignals } from "../lib/hotspots";
 
@@ -271,7 +274,7 @@ function buildHotspotPopupHtml(
     {
       label: "History/Reports",
       val: sig.historyReportsScore,
-      max: 15,
+      max: 10,
       color: "#67e8f9",
     },
   ]
@@ -305,7 +308,7 @@ function buildHotspotPopupHtml(
     <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
     <div style="margin-bottom:4px">${speciesTags}</div>
     <div style="color:#475569;font-size:10px;border-top:1px solid #1e293b;padding-top:4px;margin-top:2px">
-      Score = SST(25) + Break(25) + Chloro(20) + SSH(15) + History(15) · ERDDAP ACSPO/MUR
+      Score = SST(20) + Break(35) + Chloro(20) + SSH(15) + History(10) · ERDDAP ACSPO/MUR
     </div>
   </div>`;
 }
@@ -482,6 +485,17 @@ export default function FishingMap({
           const rawConf = computeConfidence(signals);
 
           if (rawConf >= h.minConfidence) {
+            // ── 100NM arc filter ──────────────────────────────────────────
+            // The break cell's resolved position must lie within OC_RADIUS_NM
+            // of OC Inlet.  Definitions are pre-filtered at the def level, but
+            // the actual break cell can wander outside the arc boundary.
+            const nmFromOC = distFromOCInlet(hotLat, hotLng);
+            if (nmFromOC > OC_RADIUS_NM) {
+              // Outside the 100NM operational arc — discard silently
+              loadingIds.current.delete(h.id);
+              return;
+            }
+
             // Build label relative to nearest named canyon from the break cell
             const anchorDef: HotspotDef = { ...h, lat: hotLat, lng: hotLng };
             const distLabel = computeDistanceLabel(anchorDef);
