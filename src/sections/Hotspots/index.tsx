@@ -26,8 +26,6 @@ import {
   speciesFromSST,
 } from "../../lib/hotspots";
 
-type ConditionStatus = "GO" | "MARGINAL" | "NO-GO" | "loading" | "error";
-
 export default function Hotspots() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showMap, setShowMap] = useState(true);
@@ -45,13 +43,6 @@ export default function Hotspots() {
   const [loadingIds, setLoadingIds] = useState<Set<string>>(() =>
     new Set(dynamicDefs.map((h) => h.id))
   );
-
-  const [conditions] = useState<{
-    status: ConditionStatus;
-    wind: number | null;
-    wave: number | null;
-    ts: string;
-  }>({ status: "loading", wind: null, wave: null, ts: "" });
 
   // ─── Explicit Core Target Synchronization ──────────────────────────────────
   useEffect(() => {
@@ -181,10 +172,10 @@ export default function Hotspots() {
         <FishingMap
           mode="preview"
           hotspotDefs={dynamicDefs}
-          showHotspots={showHotspots}
-          showSST={showSST}
-          sstOffset={sstOffset}
-          showBathy={showBathy}
+          showHotspots={true}
+          showSST={true}
+          sstOffset={0}
+          showBathy={true}
           onHotspotClick={handleHotspotClick}
           onHotspotsResolved={handleHotspotsResolved}
           flyTo={flyTo}
