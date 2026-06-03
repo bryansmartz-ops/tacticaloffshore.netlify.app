@@ -14,7 +14,6 @@ export interface FishingMapProps {
   onHotspotsResolved?: (hotspots: HotspotDisplay[]) => void;
   showHotspots?: boolean;
   showSST?: boolean;
-  sstOffset?: number;
   showBathy?: boolean;
   flyTo?: { lat: number; lng: number; zoom?: number };
   className?: string;
@@ -78,13 +77,12 @@ function computeDistanceLabel(h: any): string {
   return nm < 5 ? `${bestName}` : `${nm}NM of ${bestName}`;
 }
 
-// Helper to calculate high-contrast dynamic thermal colors locally
 function getLocalThermalColor(temp: number, minT: number, maxT: number): string {
   const range = maxT - minT || 1;
   const percent = (temp - minT) / range;
-  if (percent > 0.7) return "rgba(239, 68, 68, 0.45)";   // Hot Filament: Translucent Red
-  if (percent > 0.4) return "rgba(245, 158, 11, 0.35)";  // Transition Mix: Orange
-  return "rgba(59, 130, 246, 0.20)";                     // Cold Shelf Water: Low-Opacity Blue
+  if (percent > 0.7) return "rgba(239, 68, 68, 0.40)";   
+  if (percent > 0.4) return "rgba(245, 158, 11, 0.30)";  
+  return "rgba(59, 130, 246, 0.15)";                     
 }
 
 export default function FishingMap({
@@ -110,14 +108,15 @@ export default function FishingMap({
   const thermalThermalLayerRef = useRef<L.FeatureGroup | null>(null);
 
   const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
-  const loadingIds = useRef<Set<string>>(new Set(hotspotDefs.map((h) => h.id)));
+  const loadingIds = useRef<Set<string>>(new Set());
   const liveHotspotsRef = useRef<HotspotDisplay[]>(liveHotspots);
 
   useEffect(() => { liveHotspotsRef.current = liveHotspots; }, [liveHotspots]);
 
   // ── Multi-Stream Processing Hook ──────────────────────────────────────────
   useEffect(() => {
-    loadingIds.current = new Set(hotspotDefs.map((h) => h.id));
+    const activeIds = hotspotDefs.map((h) => h.id);
+    loadingIds.current = new Set(activeIds);
     setLiveHotspots([]);
     liveHotspotsRef.current = [];
 
@@ -127,7 +126,43 @@ export default function FishingMap({
     const confirmed: HotspotDisplay[] = [];
     const sampleGridPoints: { lat: number; lng: number; temp: number }[] = [];
 
+    // Helper to evaluate if all background data lines have reported complete
+    const checkCompletion = () => {
+      if (loadingIds.current.size === 0) {
+        // Trigger local canvas vector coloration
+        if (sampleGridPoints.length > 0 && mapRef.current) {
+          const temps = sampleGridPoints.map(p => p.temp);
+          const minT = Math.min(...temps);
+          const maxT = Math.max(...temps);
+
+          if (thermalThermalLayerRef.current && showSST) {
+            sampleGridPoints.forEach((p) => {
+              L.circle([p.lat, p.lng], {
+                radius: 2400,
+                stroke: false,
+                fillColor: getLocalThermalColor(p.temp, minT, maxT),
+                fillOpacity: 1,
+                interactive: false,
+              }).addTo(thermalThermalLayerRef.current!);
+            });
+          }
+
+          if (frontLinesLayerRef.current) {
+            const vectorizedFronts = traceThermalFronts(sampleGridPoints);
+            vectorizedFronts.forEach((linePoints) => {
+              const latLngs = linePoints.map(p => L.latLng(p.lat, p.lng));
+              L.polyline(latLngs, { color: "#22d3ee", weight: 3, dashArray: "4, 6", opacity: 0.95, interactive: false }).addTo(frontLinesLayerRef.current!);
+            });
+          }
+        }
+        
+        // Finalize state loops and unlock scoring spinning components
+        onHotspotsResolved?.(confirmed);
+      }
+    };
+
     hotspotDefs.forEach((h) => {
+      // Stream 1: Direct Cache Intercept Layer
       if (h.liveSst) {
         loadingIds.current.delete(h.id);
         const distLabel = computeDistanceLabel(h);
@@ -149,7 +184,7 @@ export default function FishingMap({
         confirmed.push(display);
 
         if (h.searchBbox) {
-          const steps = 8; // Tighter resolution mapping array nodes
+          const steps = 8;
           const dLat = (h.searchBbox.maxLat - h.searchBbox.minLat) / steps;
           const dLng = (h.searchBbox.maxLng - h.searchBbox.minLng) / steps;
           for (let i = 0; i <= steps; i++) {
@@ -163,46 +198,15 @@ export default function FishingMap({
           }
         }
         
-        setLiveHotspots((prev) => {
-          const next = [...prev.filter((e) => e.id !== h.id), display];
-          liveHotspotsRef.current = next;
-          return next;
-        });
-
-        if (loadingIds.current.size === 0) onHotspotsResolved?.(confirmed);
+        setLiveHotspots((prev) => [...prev.filter((e) => e.id !== h.id), display]);
+        checkCompletion();
         return; 
       }
+
+      // Stream 2: Empty Safe Route Fallback - Clears unmapped canyons out of limbo
+      loadingIds.current.delete(h.id);
+      checkCompletion();
     });
-
-    // Local Palette Vector Field Engine
-    if (sampleGridPoints.length > 0 && mapRef.current) {
-      const temps = sampleGridPoints.map(p => p.temp);
-      const minT = Math.min(...temps);
-      const maxT = Math.max(...temps);
-
-      // 1. Draw High-Contrast Background Heat Grids Locally
-      if (thermalThermalLayerRef.current && showSST) {
-        sampleGridPoints.forEach((p) => {
-          const fillColor = getLocalThermalColor(p.temp, minT, maxT);
-          L.circle([p.lat, p.lng], {
-            radius: 2200, // Seamless blending radius overlay
-            stroke: false,
-            fillColor: fillColor,
-            fillOpacity: 1,
-            interactive: false,
-          }).addTo(thermalThermalLayerRef.current!);
-        });
-      }
-
-      // 2. Draw Razor-Sharp "Rip Line" Frontal Path Overlays
-      if (frontLinesLayerRef.current) {
-        const vectorizedFronts = traceThermalFronts(sampleGridPoints);
-        vectorizedFronts.forEach((linePoints) => {
-          const latLngs = linePoints.map(p => L.latLng(p.lat, p.lng));
-          L.polyline(latLngs, { color: "#22d3ee", weight: 3, dashArray: "4, 6", opacity: 0.95, interactive: false }).addTo(frontLinesLayerRef.current!);
-        });
-      }
-    }
   }, [hotspotDefs, showSST]);
 
   // ── Map Initialization Loop ──────────────────────────────────────────
@@ -228,7 +232,6 @@ export default function FishingMap({
     const bathyOverlay = L.tileLayer(BATHY_OVERLAY_TILE, { opacity: 0.9, pane: "bathyOverlayPane", maxNativeZoom: 10, maxZoom: 14 });
     bathyOverlayRef.current = bathyOverlay; bathyOverlay.addTo(map);
 
-    // Initialise Local Feature Groups to host our canvas shapes
     const thermalLayer = L.featureGroup(); thermalLayer.addTo(map); thermalThermalLayerRef.current = thermalLayer;
     const frontLinesLayer = L.featureGroup(); frontLinesLayer.addTo(map); frontLinesLayerRef.current = frontLinesLayer;
 
@@ -246,10 +249,10 @@ export default function FishingMap({
 
   useEffect(() => {
     const map = mapRef.current; if (!map) return;
-    syncMarkers(map, liveHotspots, loadingIds.current);
+    syncMarkers(map, liveHotspots);
   }, [liveHotspots]);
 
-  function syncMarkers(map: L.Map, spots: HotspotDisplay[], loadingSet: Set<string>) {
+  function syncMarkers(map: L.Map, spots: HotspotDisplay[]) {
     const incomingIds = new Set(spots.map((h) => h.id));
     circleMarkersRef.current.forEach((marker, id) => { if (!incomingIds.has(id)) { marker.remove(); circleMarkersRef.current.delete(id); } });
     labelMarkersRef.current.forEach((marker, id) => { if (!incomingIds.has(id)) { marker.remove(); labelMarkersRef.current.delete(id); } });
@@ -260,7 +263,6 @@ export default function FishingMap({
 
       if (existing) {
         existing.setStyle({ color, fillColor: color });
-        existing.setPopupContent(buildHotspotPopupHtml(h, spots));
         return;
       }
 
