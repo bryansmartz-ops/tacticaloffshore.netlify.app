@@ -53,18 +53,7 @@ const BATHY_BASE_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Oc
 const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
 const EMPTY_SIGNALS = { sstScore: 0, sstBreakScore: 0, chloroScore: 0, altimetryScore: 0, historyReportsScore: 0 };
 
-// ─── NOAA CoastWatch WMS URL Builder (Local Palette Stretch) ──────────────────
-function buildNoaaStretchUrl(offset: number, minTempF: number, maxTempF: number): string {
-  // Convert our user-friendly Fahrenheit scales to Celsius boundaries for the NOAA ERDDAP server
-  const minC = ((minTempF - 32) * 5) / 9;
-  const maxC = ((maxTempF - 32) * 5) / 9;
-
-  // Select the high-resolution NOAA CoastWatch East Coast ACSPO dataset
-  const baseUrl = "https://www.coastwatch.noaa.gov/erddap/wms/noaacwVHNsstLines3Day/request";
-  
-  // Compile the query string with dynamic color scale constraints and a high-contrast palette
-  return `${baseUrl}?service=WMS&version=1.3.0&request=GetMap&layers=noaacwVHNsstLines3Day%3Asst&styles=Image%2CScale%2CBox%2C&format=image%2Fpng&transparent=true&crs=CRS%3A84&width=256&height=256&bbox={bbox-epsg-3857}&colorscalerange=${minC.toFixed(1)},${maxC.toFixed(1)}&palette=Jet`;
-}
+const NOAA_WMS_BASE_URL = "https://www.coastwatch.noaa.gov/erddap/wms/noaacwVHNsstLines3Day/request";
 
 function rankBadge(id: string, hotspots: HotspotDisplay[]): string {
   const sorted = [...hotspots].sort((a, b) => b.confidence - a.confidence);
@@ -74,7 +63,7 @@ function rankBadge(id: string, hotspots: HotspotDisplay[]): string {
   return "";
 }
 
-function buildHotspotPopupHtml(h: HotspotDisplay, allHotspots: HotspotDisplay[], isLoading = false): string {
+function buildHotspotPopupHtml(h: HotspotDisplay, allHotspots: HotspotDisplay[]): string {
   const color = confidenceColor(h.confidence);
   const td = toLoranTD(h.lat, h.lng);
   const badge = rankBadge(h.id, allHotspots);
@@ -122,7 +111,7 @@ export default function FishingMap({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
 
-  const sstLayerRef = useRef<L.TileLayer | null>(null);
+  const sstLayerRef = useRef<L.TileLayer.WMS | null>(null);
   const bathyBaseRef = useRef<L.TileLayer | null>(null);
   const bathyOverlayRef = useRef<L.TileLayer | null>(null);
 
@@ -226,9 +215,21 @@ export default function FishingMap({
     const bathyOverlay = L.tileLayer(BATHY_OVERLAY_TILE, { opacity: 0.9, pane: "bathyOverlayPane", maxNativeZoom: 10, maxZoom: 14 });
     bathyOverlayRef.current = bathyOverlay; bathyOverlay.addTo(map);
 
-    // Dynamic initial scale clamping: Default strictly to Mid-Atlantic summer pre-sets (58°F to 74°F)
-    const initialSstUrl = buildNoaaStretchUrl(0, 58, 74);
-    const sstLayer = L.tileLayer(initialSstUrl, { opacity: mode === "full" ? 0.55 : 0.70, pane: "sstPane", maxZoom: 14 });
+    // Initialise via built-in Leaflet WMS module to properly manage projection boundaries
+    const sstLayer = L.tileLayer.wms(NOAA_WMS_BASE_URL, {
+      layers: "noaacwVHNsstLines3Day:sst",
+      format: "image/png",
+      transparent: true,
+      version: "1.3.0",
+      crs: L.CRS.EPSG3857,
+      opacity: mode === "full" ? 0.55 : 0.70,
+      pane: "sstPane",
+      // Set default initial Celsius scales equivalent to roughly 58°F to 74°F
+      colorscalerange: "14.4,23.3",
+      palette: "Jet",
+      styles: "Image,Scale,Box"
+    });
+    
     sstLayerRef.current = sstLayer; sstLayer.addTo(map);
 
     const frontLinesLayer = L.featureGroup();
@@ -252,22 +253,24 @@ export default function FishingMap({
     const layer = sstLayerRef.current;
     if (!layer || hotspotDefs.length === 0) return;
 
-    // Isolate active target readings passed from your cached brief rows
     const liveTemps = hotspotDefs.map(h => h.liveSst).filter(Boolean) as number[];
     
     if (liveTemps.length > 0) {
-      // Establish our local floor and ceiling windows dynamically
       const padding = 2.0; 
-      const minStretch = Math.min(...liveTemps) - 10.0; // Captures cold northern shelf water
-      const maxStretch = Math.max(...liveTemps) + padding; // Captures core Gulf Stream boundary
+      const minStretch = Math.min(...liveTemps) - 10.0; 
+      const maxStretch = Math.max(...liveTemps) + padding; 
 
-      // Clamp limits safely to fit Mid-Atlantic parameters (e.g., 58.0°F to 73.5°F)
-      const adjustedMin = Math.max(55, minStretch);
-      const adjustedMax = Math.min(84, maxStretch);
+      const adjustedMinF = Math.max(55, minStretch);
+      const adjustedMaxF = Math.min(84, maxStretch);
 
-      // Re-compile the tile layers with the stretched color scale values
-      const localizedNoaaUrl = buildNoaaStretchUrl(sstOffset, adjustedMin, adjustedMax);
-      layer.setUrl(localizedNoaaUrl);
+      // Convert to Celsius string blocks for the live WMS query updater
+      const minC = ((adjustedMinF - 32) * 5) / 9;
+      const maxC = ((adjustedMaxF - 32) * 5) / 9;
+
+      // Update the options dynamically—Leaflet handles the URL rebuilding automatically
+      layer.setParams({
+        colorscalerange: `${minC.toFixed(1)},${maxC.toFixed(1)}`
+      });
     }
   }, [hotspotDefs, sstOffset]);
 
@@ -287,12 +290,12 @@ export default function FishingMap({
 
       if (existing) {
         existing.setStyle({ color, fillColor: color });
-        existing.setPopupContent(buildHotspotPopupHtml(h, spots, false));
+        existing.setPopupContent(buildHotspotPopupHtml(h, spots));
         return;
       }
 
       const circle = L.circleMarker([h.lat, h.lng], { pane: "hotspotPane", radius: 13, color, fillColor: color, fillOpacity: 0.35, weight: 2, interactive: true });
-      circle.bindPopup(buildHotspotPopupHtml(h, spots, false), { className: "fishing-map-popup" });
+      circle.bindPopup(buildHotspotPopupHtml(h, spots), { className: "fishing-map-popup" });
       circle.addTo(map);
       circleMarkersRef.current.set(h.id, circle);
 
