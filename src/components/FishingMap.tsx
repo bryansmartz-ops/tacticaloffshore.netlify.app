@@ -53,7 +53,8 @@ const BATHY_BASE_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Oc
 const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
 const EMPTY_SIGNALS = { sstScore: 0, sstBreakScore: 0, chloroScore: 0, altimetryScore: 0, historyReportsScore: 0 };
 
-const NOAA_WMS_BASE_URL = "https://www.coastwatch.noaa.gov/erddap/wms/noaacwVHNsstLines3Day/request";
+// REMOVED "www." — Resolved net::ERR_NAME_NOT_RESOLVED routing crash
+const NOAA_WMS_BASE_URL = "https://coastwatch.noaa.gov/erddap/wms/noaacwVHNsstLines3Day/request";
 
 function rankBadge(id: string, hotspots: HotspotDisplay[]): string {
   const sorted = [...hotspots].sort((a, b) => b.confidence - a.confidence);
@@ -215,7 +216,6 @@ export default function FishingMap({
     const bathyOverlay = L.tileLayer(BATHY_OVERLAY_TILE, { opacity: 0.9, pane: "bathyOverlayPane", maxNativeZoom: 10, maxZoom: 14 });
     bathyOverlayRef.current = bathyOverlay; bathyOverlay.addTo(map);
 
-    // Initialise via built-in Leaflet WMS module to properly manage projection boundaries
     const sstLayer = L.tileLayer.wms(NOAA_WMS_BASE_URL, {
       layers: "noaacwVHNsstLines3Day:sst",
       format: "image/png",
@@ -224,8 +224,7 @@ export default function FishingMap({
       crs: L.CRS.EPSG3857,
       opacity: mode === "full" ? 0.55 : 0.70,
       pane: "sstPane",
-      // Set default initial Celsius scales equivalent to roughly 58°F to 74°F
-      colorscalerange: "14.4,23.3",
+      colorscalerange: "16.0,23.2",
       palette: "Jet",
       styles: "Image,Scale,Box"
     });
@@ -263,11 +262,9 @@ export default function FishingMap({
       const adjustedMinF = Math.max(55, minStretch);
       const adjustedMaxF = Math.min(84, maxStretch);
 
-      // Convert to Celsius string blocks for the live WMS query updater
       const minC = ((adjustedMinF - 32) * 5) / 9;
       const maxC = ((adjustedMaxF - 32) * 5) / 9;
 
-      // Update the options dynamically—Leaflet handles the URL rebuilding automatically
       layer.setParams({
         colorscalerange: `${minC.toFixed(1)},${maxC.toFixed(1)}`
       });
