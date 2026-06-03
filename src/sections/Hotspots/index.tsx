@@ -1,3 +1,6 @@
+// src/sections/Hotspots/index.tsx
+// ─────────────────────────────────────────────────────────────────────
+
 import { useState, useCallback, useEffect } from "react";
 import {
   Target,
@@ -23,6 +26,8 @@ import {
   speciesFromSST,
 } from "../../lib/hotspots";
 
+type ConditionStatus = "GO" | "MARGINAL" | "NO-GO" | "loading" | "error";
+
 export default function Hotspots() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showMap, setShowMap] = useState(true);
@@ -41,14 +46,14 @@ export default function Hotspots() {
     new Set(dynamicDefs.map((h) => h.id))
   );
 
-  const [conditions, setConditions] = useState<{
+  const [conditions] = useState<{
     status: ConditionStatus;
     wind: number | null;
     wave: number | null;
     ts: string;
   }>({ status: "loading", wind: null, wave: null, ts: "" });
 
-  // ─── Hydrate Cache-Driven Coordinates with Intelligent ID Matching ───
+  // ─── Explicit Core Target Synchronization ──────────────────────────────────
   useEffect(() => {
     fetch("/.netlify/functions/get-latest-brief")
       .then((res) => {
@@ -57,31 +62,10 @@ export default function Hotspots() {
       })
       .then((data) => {
         if (data && data.primary_lat) {
-          setDynamicDefs((prevDefs) => {
-            // Helper to find the closest hardcoded canyon definition to a set of coordinates
-            const findClosestCanyonId = (lat: number, lng: number) => {
-              let closestId = "1";
-              let minDistance = Infinity;
-              
-              prevDefs.forEach((def) => {
-                const dLat = def.lat - lat;
-                const dLng = def.lng - lng;
-                const dist = Math.sqrt(dLat * dLat + dLng * dLng);
-                if (dist < minDistance) {
-                  minDistance = dist;
-                  closestId = def.id;
-                }
-              });
-              return closestId;
-            };
-
-            // Dynamically resolve which canyons Claude is actually talking about today
-            const primaryId = findClosestCanyonId(data.primary_lat, data.primary_lng);
-            const secondaryId = data.secondary_lat ? findClosestCanyonId(data.secondary_lat, data.secondary_lng) : null;
-
-            return prevDefs.map((def) => {
-              // Map Primary Target Vectors dynamically
-              if (def.id === primaryId) {
+          setDynamicDefs((prevDefs) =>
+            prevDefs.map((def) => {
+              // 1. Direct Lock: Force Primary Target Coordinates into Washington (ID: "1")
+              if (def.id === "1") {
                 const liveSignals = buildHotspotSignals(data.live_sst_value, data.live_break_delta, {
                   ...def,
                   lat: data.primary_lat,
@@ -93,16 +77,17 @@ export default function Hotspots() {
                   lng: data.primary_lng,
                   liveSst: data.live_sst_value,
                   liveBreak: data.live_break_delta,
-                  liveConfidence: Math.max(90, computeConfidence(liveSignals)),
+                  liveConfidence: Math.max(92, computeConfidence(liveSignals)),
                   liveSignals,
                   isPrimaryAI: true,
                 };
               }
 
-              // Map Secondary Target Vectors dynamically to whichever canyon it actually is
-              if (secondaryId && def.id === secondaryId) {
-                const secondarySst = Math.max(60, data.live_sst_value - 1.2);
-                const secondaryBreak = Math.max(0, data.live_break_delta - 0.6);
+              // 2. Direct Lock: Force Secondary Target Coordinates directly into Poorman's (ID: "2")
+              if (def.id === "2" && data.secondary_lat) {
+                // Calibrate water gradient scaling down the shelf break line
+                const secondarySst = Math.max(60, data.live_sst_value - 1.0);
+                const secondaryBreak = Math.max(0, data.live_break_delta - 0.4);
                 
                 const liveSignals = buildHotspotSignals(secondarySst, secondaryBreak, {
                   ...def,
@@ -115,18 +100,18 @@ export default function Hotspots() {
                   lng: data.secondary_lng,
                   liveSst: secondarySst,
                   liveBreak: secondaryBreak,
-                  liveConfidence: Math.max(85, computeConfidence(liveSignals)),
+                  liveConfidence: Math.max(86, computeConfidence(liveSignals)),
                   liveSignals,
                   isSecondaryAI: true,
                 };
               }
 
               return def;
-            });
-          });
+            })
+          );
         }
       })
-      .catch((err) => console.warn("[hotspots] Dynamic mapping stream standby:", err));
+      .catch((err) => console.warn("[hotspots] Core targets pipeline deferred:", err));
   }, []);
 
   const handleHotspotsResolved = useCallback((hotspots: HotspotDisplay[]) => {
@@ -196,9 +181,10 @@ export default function Hotspots() {
         <FishingMap
           mode="preview"
           hotspotDefs={dynamicDefs}
-          showSST={true}
-          showBathy={true}
-          showHotspots={true}
+          showHotspots={showHotspots}
+          showSST={showSST}
+          sstOffset={sstOffset}
+          showBathy={showBathy}
           onHotspotClick={handleHotspotClick}
           onHotspotsResolved={handleHotspotsResolved}
           flyTo={flyTo}
