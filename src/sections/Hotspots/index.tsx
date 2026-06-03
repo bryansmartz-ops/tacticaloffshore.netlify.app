@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   Target,
   Flame,
@@ -18,69 +18,115 @@ import {
   confidenceColor,
   HOTSPOT_DEFS,
   HOTSPOTS_IN_RANGE,
+  buildHotspotSignals,
+  computeConfidence,
+  speciesFromSST,
 } from "../../lib/hotspots";
 
 export default function Hotspots() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showMap, setShowMap] = useState(true);
-  const [flyTo, setFlyTo] = useState<
-    { lat: number; lng: number; zoom?: number } | undefined
-  >();
+  const [flyTo, setFlyTo] = useState<{ lat: number; lng: number; zoom?: number } | undefined>();
 
-  // Live-resolved hotspot display data — FishingMap calls onHotspotsResolved after SSTs arrive
+  // Live-resolved data frameworks
   const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
   const [sstDate] = useState(gibsSSTDate);
   const [cacheAge, setCacheAge] = useState<number | null>(getCacheAge);
-  const [loadingIds, setLoadingIds] = useState<Set<string>>(
-    () =>
-      new Set(
-        (HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS).map(
-          (h) => h.id,
-        ),
-      ),
+  
+  const [dynamicDefs, setDynamicDefs] = useState<any[]>(() => 
+    HOTSPOTS_IN_RANGE.length > 0 ? [...HOTSPOTS_IN_RANGE] : [...HOTSPOT_DEFS]
   );
 
-  const activeHotspotDefs =
-    HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS;
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(() =>
+    new Set(dynamicDefs.map((h) => h.id))
+  );
+
+  // ─── Hydrate Cache-Driven Coordinates ──────────────────────────────────────
+  useEffect(() => {
+    fetch("/.netlify/functions/get-latest-brief")
+      .then((res) => {
+        if (!res.ok) throw new Error("Endpoint standby mode");
+        return res.json();
+      })
+      .then((data) => {
+        if (data && data.primary_lat) {
+          setDynamicDefs((prevDefs) =>
+            prevDefs.map((def) => {
+              // Intercept Washington Canyon and map structural analytics onto its coordinates
+              if (def.id === "1") {
+                const liveSignals = buildHotspotSignals(data.live_sst_value, data.live_break_delta, {
+                  ...def,
+                  lat: data.primary_lat,
+                  lng: data.primary_lng,
+                });
+                return {
+                  ...def,
+                  lat: data.primary_lat,
+                  lng: data.primary_lng,
+                  liveSst: data.live_sst_value,
+                  liveBreak: data.live_break_delta,
+                  liveConfidence: computeConfidence(liveSignals),
+                  liveSignals,
+                };
+              }
+              return def;
+            })
+          );
+        }
+      })
+      .catch((err) => console.warn("[hotspots] Analytical pipeline backup deferred:", err));
+  }, []);
 
   const handleHotspotsResolved = useCallback((hotspots: HotspotDisplay[]) => {
-    setLiveHotspots(hotspots);
-    setLoadingIds(new Set()); // all resolved
+    // Map our background numbers across incoming satellite frames safely
+    const compiled = hotspots.map((satHot) => {
+      const match = dynamicDefs.find((d) => d.id === satHot.id);
+      if (match && match.liveSst) {
+        return {
+          ...satHot,
+          lat: match.lat,
+          lng: match.lng,
+          sstTemp: match.liveSst,
+          breakDelta: match.liveBreak,
+          confidence: match.liveConfidence,
+          signals: match.liveSignals,
+          species: speciesFromSST(match.liveSst),
+        };
+      }
+      return satHot;
+    });
+
+    setLiveHotspots(compiled);
+    setLoadingIds(new Set()); // Drop all loading states
     setCacheAge(getCacheAge());
-  }, []);
+  }, [dynamicDefs]);
 
   const handleHotspotClick = useCallback(
     (id: string) => {
       setSelectedId((prev) => (prev === id ? null : id));
-      // dynamic hotspot ids start with "dyn-", find in liveHotspots instead
-      const h =
-        activeHotspotDefs.find((x) => x.id === id) ??
-        liveHotspots.find((x) => x.id === id);
+      const h = dynamicDefs.find((x) => x.id === id) ?? liveHotspots.find((x) => x.id === id);
       if (h) setFlyTo({ lat: h.lat, lng: h.lng, zoom: 9 });
     },
-    [activeHotspotDefs, liveHotspots],
+    [dynamicDefs, liveHotspots],
   );
 
-  // Whether fetches have all completed (loadingIds empty after first resolution)
   const fetchesDone = loadingIds.size === 0;
-  // allSatelliteUnavailable is true when fetches are done but resolved to empty list
   const allSatelliteUnavailable = fetchesDone && liveHotspots.length === 0;
 
-  // Show spinner placeholders while fetching; once done show live + dynamic entries.
-  // Sorted by confidence descending so PRIMARY / SECONDARY are always at top.
+  // Sorting array compiled cleanly with zero string type leaks
   const displayHotspots: HotspotDisplay[] = fetchesDone
     ? [...liveHotspots].sort((a, b) => b.confidence - a.confidence)
-    : activeHotspotDefs.map((h) => ({
+    : dynamicDefs.map((h) => ({
         id: h.id,
         title: h.title,
-        confidence: 50,
-        sstTemp: h.fallbackSstF,
-        breakDelta: 0,
+        confidence: h.liveConfidence ?? 50,
+        sstTemp: h.liveSst ?? h.fallbackSstF,
+        breakDelta: h.liveBreak ?? 0,
         lat: h.lat,
         lng: h.lng,
-        species: [],
-        isFallbackSst: true,
-        signals: {
+        species: h.liveSst ? speciesFromSST(h.liveSst) : [],
+        isFallbackSst: !h.liveSst,
+        signals: h.liveSignals ?? {
           sstScore: 0,
           sstBreakScore: 0,
           chloroScore: 0,
@@ -97,7 +143,7 @@ export default function Hotspots() {
       >
         <FishingMap
           mode="preview"
-          hotspotDefs={activeHotspotDefs}
+          hotspotDefs={dynamicDefs}
           showSST={true}
           showBathy={true}
           showHotspots={true}
@@ -111,11 +157,7 @@ export default function Hotspots() {
           onClick={() => setShowMap((v) => !v)}
           className="absolute bottom-2 right-2 z-[1000] bg-slate-800/90 border border-slate-600 text-slate-300 text-xs px-2 py-1 rounded-lg flex items-center gap-1"
         >
-          {showMap ? (
-            <ChevronUp className="w-3 h-3" />
-          ) : (
-            <ChevronDown className="w-3 h-3" />
-          )}
+          {showMap ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           {showMap ? "Hide map" : "Show map"}
         </button>
 
@@ -163,7 +205,6 @@ export default function Hotspots() {
           GIBS {sstDate} · Cached hourly · Tap card to pan map
         </p>
 
-        {/* No-satellite empty state */}
         {allSatelliteUnavailable && (
           <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
             <AlertTriangle className="w-10 h-10 text-amber-500 opacity-70" />
@@ -175,10 +216,6 @@ export default function Hotspots() {
               predictions require live satellite data and cannot be shown using
               hardcoded fallback temperatures.
             </p>
-            <p className="text-slate-600 text-xs max-w-xs">
-              This typically resolves within a few hours as satellite passes
-              update the ACSPO / MUR composites. Try refreshing the page.
-            </p>
           </div>
         )}
 
@@ -186,11 +223,9 @@ export default function Hotspots() {
           const td = toLoranTD(h.lat, h.lng);
           const isSelected = selectedId === h.id;
           const isLoading = loadingIds.has(h.id);
-          const def = activeHotspotDefs.find((d) => d.id === h.id);
+          const def = dynamicDefs.find((d) => d.id === h.id);
 
-          // All displayed entries are either loading-placeholders or confirmed live
           const hasLiveSST = !isLoading;
-          const isFallback = false; // fallback entries are excluded before reaching here
 
           return (
             <div
@@ -214,8 +249,7 @@ export default function Hotspots() {
                   </h3>
                   <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
                     <MapPin className="w-3 h-3" />
-                    {h.lat.toFixed(2)}&#176;N, {Math.abs(h.lng).toFixed(2)}
-                    &#176;W
+                    {h.lat.toFixed(2)}&#176;N, {Math.abs(h.lng).toFixed(2)}&#176;W
                   </div>
                 </div>
                 <div className="text-right">
@@ -248,11 +282,7 @@ export default function Hotspots() {
                   ) : (
                     <>
                       <ThermometerSun className="w-4 h-4 text-orange-400" />
-                      <span
-                        className={
-                          hasLiveSST ? "text-orange-400" : "text-slate-400"
-                        }
-                      >
+                      <span className={hasLiveSST ? "text-orange-400" : "text-slate-400"}>
                         {h.sstTemp.toFixed(1)}&#176;F
                       </span>
                       {hasLiveSST && (
@@ -266,52 +296,23 @@ export default function Hotspots() {
                 {!isLoading && (
                   <div className="flex items-center gap-1 text-amber-400">
                     <Flame className="w-4 h-4" />
-                    {h.breakDelta > 0
-                      ? `+${h.breakDelta}&#176;F break`
-                      : "no break detected"}
+                    {h.breakDelta > 0 ? `+${h.breakDelta}&#176;F break` : "no break detected"}
                   </div>
                 )}
               </div>
 
-              {/* Signal bucket mini-bars */}
+              {/* Signal breakdown bars mapped cleanly from cache data frames */}
               {!isLoading && (
                 <div className="space-y-0.5 mt-1">
                   {[
-                    {
-                      label: "SST",
-                      val: h.signals.sstScore,
-                      max: 20,
-                      color: "#fb923c",
-                    },
-                    {
-                      label: "Break",
-                      val: h.signals.sstBreakScore,
-                      max: 35,
-                      color: "#fbbf24",
-                    },
-                    {
-                      label: "Chloro",
-                      val: h.signals.chloroScore,
-                      max: 20,
-                      color: "#4ade80",
-                    },
-                    {
-                      label: "SSH",
-                      val: h.signals.altimetryScore,
-                      max: 15,
-                      color: "#818cf8",
-                    },
-                    {
-                      label: "History",
-                      val: h.signals.historyReportsScore,
-                      max: 10,
-                      color: "#67e8f9",
-                    },
+                    { label: "SST", val: h.signals.sstScore, max: 20, color: "#fb923c" },
+                    { label: "Break", val: h.signals.sstBreakScore, max: 35, color: "#fbbf24" },
+                    { label: "Chloro", val: h.signals.chloroScore, max: 20, color: "#4ade80" },
+                    { label: "SSH", val: h.signals.altimetryScore, max: 15, color: "#818cf8" },
+                    { label: "History", val: h.signals.historyReportsScore, max: 10, color: "#67e8f9" },
                   ].map((r) => (
                     <div key={r.label} className="flex items-center gap-1.5">
-                      <span className="text-[9px] text-slate-500 w-10 shrink-0">
-                        {r.label}
-                      </span>
+                      <span className="text-[9px] text-slate-500 w-10 shrink-0">{r.label}</span>
                       <div className="flex-1 bg-slate-700 rounded-full h-1.5 overflow-hidden">
                         <div
                           className="h-full rounded-full transition-all duration-500"
@@ -321,10 +322,7 @@ export default function Hotspots() {
                           }}
                         />
                       </div>
-                      <span
-                        className="text-[9px] shrink-0"
-                        style={{ color: r.color }}
-                      >
+                      <span className="text-[9px] shrink-0" style={{ color: r.color }}>
                         {r.val}/{r.max}
                       </span>
                     </div>
@@ -342,10 +340,7 @@ export default function Hotspots() {
               {!isLoading && h.species.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {h.species.map((s) => (
-                    <span
-                      key={s}
-                      className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full"
-                    >
+                    <span key={s} className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full">
                       {s}
                     </span>
                   ))}
@@ -354,11 +349,7 @@ export default function Hotspots() {
 
               {!isLoading && (
                 <div className="text-[10px] text-slate-600 mt-0.5">
-                  {h.isDynamic
-                    ? `Dynamic break detected offshore · ${h.anchorTitle ?? ""}`
-                    : def
-                      ? `${def.idealSstF}&#176;F ideal · ${def.historyPrior}/10 history score`
-                      : ""}
+                  {def ? `${def.idealSstF}&#176;F ideal · ${def.historyPrior}/10 history score` : ""}
                 </div>
               )}
             </div>
