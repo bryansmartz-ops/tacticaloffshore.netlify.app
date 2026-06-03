@@ -106,7 +106,6 @@ export default function Hotspots() {
   }, []);
 
   const handleHotspotsResolved = useCallback((hotspots: HotspotDisplay[]) => {
-    // Map our background numbers across incoming satellite frames safely
     const compiled = hotspots.map((satHot) => {
       const match = dynamicDefs.find((d) => d.id === satHot.id);
       if (match && match.liveSst) {
@@ -141,7 +140,6 @@ export default function Hotspots() {
   const fetchesDone = loadingIds.size === 0;
   const allSatelliteUnavailable = fetchesDone && liveHotspots.length === 0;
 
-  // Sorting array compiled cleanly with zero string type leaks
   const displayHotspots: HotspotDisplay[] = fetchesDone
     ? [...liveHotspots].sort((a, b) => b.confidence - a.confidence)
     : dynamicDefs.map((h) => ({
