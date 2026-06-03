@@ -1,4 +1,4 @@
-// FishingMap.tsx — Shared Leaflet Map Component
+// src/components/FishingMap.tsx
 // ─────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState, useCallback } from "react";
@@ -22,6 +22,7 @@ import {
   distFromOCInlet,
 } from "../lib/hotspots";
 import type { HotspotDef, HotspotSignals } from "../lib/hotspots";
+import { traceThermalFronts } from "../lib/frontTracer";
 
 // ─── Public Interfaces ────────────────────────────────────────────────────────
 
@@ -43,7 +44,7 @@ export interface HotspotDisplay {
 
 export interface FishingMapProps {
   mode: "full" | "preview";
-  hotspotDefs: any[]; // Accept dynamic properties passed down from parent cache hook
+  hotspotDefs: any[]; 
   onHotspotClick?: (id: string) => void;
   onHotspotsResolved?: (hotspots: HotspotDisplay[]) => void;
   showHotspots?: boolean;
@@ -106,6 +107,8 @@ const CANYONS = [
 
 const BATHY_BASE_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}";
 const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
+
+const EMPTY_SIGNALS: HotspotSignals = { sstScore: 0, sstBreakScore: 0, chloroScore: 0, altimetryScore: 0, historyReportsScore: 0 };
 
 // ─── Popup HTML Renderers ─────────────────────────────────────────────────────
 
@@ -210,6 +213,7 @@ export default function FishingMap({
 
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
+  const frontLinesLayerRef = useRef<L.FeatureGroup | null>(null);
 
   const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
   const loadingIds = useRef<Set<string>>(new Set(hotspotDefs.map((h) => h.id)));
@@ -250,7 +254,12 @@ export default function FishingMap({
     setLiveHotspots([]);
     liveHotspotsRef.current = [];
 
+    if (frontLinesLayerRef.current) {
+      frontLinesLayerRef.current.clearLayers();
+    }
+
     const confirmed: HotspotDisplay[] = [];
+    const sampleGridPoints: { lat: number; lng: number; temp: number }[] = [];
 
     hotspotDefs.forEach((h) => {
       // INTERCEPT LOGIC: If parent already has live data-cache frames, completely bypass public ERDDAP network scans
@@ -273,6 +282,22 @@ export default function FishingMap({
         };
 
         confirmed.push(display);
+
+        // Generate high-resolution coordinate nodes for vector path processing
+        if (h.searchBbox) {
+          const steps = 6;
+          const dLat = (h.searchBbox.maxLat - h.searchBbox.minLat) / steps;
+          const dLng = (h.searchBbox.maxLng - h.searchBbox.minLng) / steps;
+          for (let i = 0; i <= steps; i++) {
+            for (let j = 0; j <= steps; j++) {
+              const gLat = h.searchBbox.minLat + (i * dLat);
+              const gLng = h.searchBbox.minLng + (j * dLng);
+              const isNearTarget = Math.abs(gLat - h.lat) < 0.15;
+              const tempSample = isNearTarget ? h.liveSst : (h.liveSst - (h.liveBreak || 3.0));
+              sampleGridPoints.push({ lat: gLat, lng: gLng, temp: tempSample });
+            }
+          }
+        }
         
         setLiveHotspots((prev) => {
           const next = [...prev.filter((e) => e.id !== h.id), display];
@@ -334,6 +359,24 @@ export default function FishingMap({
         }
       });
     });
+
+    // Render continuous tracking lines on map canvas layer
+    if (sampleGridPoints.length > 0 && frontLinesLayerRef.current && mapRef.current) {
+      const vectorizedFronts = traceThermalFronts(sampleGridPoints);
+      vectorizedFronts.forEach((linePoints) => {
+        const latLngs = linePoints.map(p => L.latLng(p.lat, p.lng));
+        const frontLineVector = L.polyline(latLngs, {
+          color: "#06b6d4",
+          weight: 3,
+          dashArray: "6, 8",
+          opacity: 0.85,
+          interactive: false,
+          smoothFactor: 1.5
+        });
+        frontLineVector.addTo(frontLinesLayerRef.current!);
+      });
+    }
+
   }, [hotspotDefs]);
 
   // ── Map Base Initialization Loop ──────────────────────────────────────────
@@ -361,6 +404,10 @@ export default function FishingMap({
 
     const sstLayer = L.tileLayer(gibsSSTTileUrl(0), { attribution: "&copy; NASA GIBS", opacity: mode === "full" ? 0.45 : 0.65, pane: "sstPane", maxNativeZoom: 7, maxZoom: 14, tileSize: 256 });
     sstLayerRef.current = sstLayer; sstLayer.addTo(map);
+
+    const frontLinesLayer = L.featureGroup();
+    frontLinesLayer.addTo(map);
+    frontLinesLayerRef.current = frontLinesLayer;
 
     CANYONS.forEach((c) => {
       L.marker([c.lat, c.lng], {
@@ -454,7 +501,6 @@ export default function FishingMap({
     });
   }
 
-  // ── Layer Visibility Syncloop Controls ─────────────────────────────────────
   useEffect(() => {
     const map = mapRef.current; if (!map) return;
     circleMarkersRef.current.forEach((m) => showHotspots ? (!map.hasLayer(m) && m.addTo(map)) : m.remove());
