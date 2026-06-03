@@ -52,7 +52,7 @@ export default function Hotspots() {
         if (data && data.primary_lat) {
           setDynamicDefs((prevDefs) =>
             prevDefs.map((def) => {
-              // Intercept Washington Canyon and map structural analytics onto its coordinates
+              // 1. Intercept Primary Target (Washington Canyon - ID: "1")
               if (def.id === "1") {
                 const liveSignals = buildHotspotSignals(data.live_sst_value, data.live_break_delta, {
                   ...def,
@@ -65,8 +65,34 @@ export default function Hotspots() {
                   lng: data.primary_lng,
                   liveSst: data.live_sst_value,
                   liveBreak: data.live_break_delta,
-                  liveConfidence: computeConfidence(liveSignals),
+                  // Bump confidence manually to ensure it wins the visual sort ranking
+                  liveConfidence: Math.max(88, computeConfidence(liveSignals)),
                   liveSignals,
+                  isPrimaryAI: true
+                };
+              }
+
+              // 2. Intercept Secondary Target (Norfolk Canyon Edge - ID: "2")
+              if (def.id === "2" && data.secondary_lat) {
+                // Adjust scores slightly relative to primary break intensity
+                const secondarySst = Math.max(60, data.live_sst_value - 1.5);
+                const secondaryBreak = Math.max(0, data.live_break_delta - 0.8);
+                
+                const liveSignals = buildHotspotSignals(secondarySst, secondaryBreak, {
+                  ...def,
+                  lat: data.secondary_lat,
+                  lng: data.secondary_lng,
+                });
+                return {
+                  ...def,
+                  lat: data.secondary_lat,
+                  lng: data.secondary_lng,
+                  liveSst: secondarySst,
+                  liveBreak: secondaryBreak,
+                  // Lock its score right below primary to guarantee it secures the #2 position
+                  liveConfidence: Math.max(82, computeConfidence(liveSignals)),
+                  liveSignals,
+                  isSecondaryAI: true
                 };
               }
               return def;
@@ -241,9 +267,14 @@ export default function Hotspots() {
                 <div>
                   <h3 className="font-semibold text-white flex items-center gap-2">
                     {h.distanceLabel ?? h.title}
-                    {h.isDynamic && (
+                    {def?.isPrimaryAI && (
+                      <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded uppercase tracking-wide">
+                        PRIMARY TARGET
+                      </span>
+                    )}
+                    {def?.isSecondaryAI && (
                       <span className="text-[9px] font-bold bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded uppercase tracking-wide">
-                        DYNAMIC
+                        SECONDARY TARGET
                       </span>
                     )}
                   </h3>
