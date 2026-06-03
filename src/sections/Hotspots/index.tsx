@@ -12,6 +12,8 @@ import {
   ChevronUp,
   RefreshCw,
   AlertTriangle,
+  Layers,
+  History
 } from "lucide-react";
 import FishingMap from "../../components/FishingMap";
 import type { HotspotDisplay } from "../../components/FishingMap";
@@ -30,6 +32,13 @@ export default function Hotspots() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showMap, setShowMap] = useState(true);
   const [flyTo, setFlyTo] = useState<{ lat: number; lng: number; zoom?: number } | undefined>();
+
+  // ─── Toggles & Timeline Playback States ────────────────────────────────────
+  const [showHotspots, setShowHotspots] = useState(true);
+  const [showSST, setShowSST] = useState(true);
+  const [showBathy, setShowBathy] = useState(true);
+  const [sstOffset, setSstOffset] = useState<number>(0); // 0=Live, 1=-12h, 2=-24h, 3=-36h
+  const [showControls, setShowControls] = useState(false);
 
   // Live-resolved data frameworks
   const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
@@ -55,7 +64,6 @@ export default function Hotspots() {
         if (data && data.primary_lat) {
           setDynamicDefs((prevDefs) =>
             prevDefs.map((def) => {
-              // 1. Direct Lock: Force Primary Target Coordinates into Washington (ID: "1")
               if (def.id === "1") {
                 const liveSignals = buildHotspotSignals(data.live_sst_value, data.live_break_delta, {
                   ...def,
@@ -74,9 +82,7 @@ export default function Hotspots() {
                 };
               }
 
-              // 2. Direct Lock: Force Secondary Target Coordinates directly into Poorman's (ID: "2")
               if (def.id === "2" && data.secondary_lat) {
-                // Calibrate water gradient scaling down the shelf break line
                 const secondarySst = Math.max(60, data.live_sst_value - 1.0);
                 const secondaryBreak = Math.max(0, data.live_break_delta - 0.4);
                 
@@ -170,15 +176,73 @@ export default function Hotspots() {
         <FishingMap
           mode="preview"
           hotspotDefs={dynamicDefs}
-          showHotspots={true}
-          showSST={true}
-          sstOffset={0}
-          showBathy={true}
+          showHotspots={showHotspots}
+          showSST={showSST}
+          sstOffset={sstOffset}
+          showBathy={showBathy}
           onHotspotClick={handleHotspotClick}
           onHotspotsResolved={handleHotspotsResolved}
           flyTo={flyTo}
           className="absolute inset-0"
         />
+
+        {/* Floating Controller HUD */}
+        <div className="absolute top-2 right-2 z-[1000] flex flex-col gap-1.5 items-end">
+          <button
+            onClick={() => setShowControls((v) => !v)}
+            className="bg-slate-900/90 border border-slate-700 text-slate-200 p-2 rounded-xl shadow-xl flex items-center justify-center backdrop-blur-sm"
+          >
+            <Layers className="w-4 h-4" />
+          </button>
+
+          {showControls && (
+            <div className="bg-slate-900/95 border border-slate-700 p-3 rounded-xl shadow-2xl w-48 space-y-3 backdrop-blur-sm text-xs text-slate-200">
+              {/* Layer Toggles */}
+              <div className="space-y-1.5">
+                <div className="font-semibold text-slate-400 tracking-wider uppercase text-[10px]">Layers</div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={showHotspots} onChange={(e) => setShowHotspots(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
+                  <span>AI Hotspot Pins</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={showSST} onChange={(e) => setShowSST(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
+                  <span>Satellite SST Overlay</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={showBathy} onChange={(e) => setShowBathy(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
+                  <span>High-Res Bathymetry</span>
+                </label>
+              </div>
+
+              {/* Time Playback */}
+              <div className="space-y-1.5 border-t border-slate-800 pt-2">
+                <div className="font-semibold text-slate-400 tracking-wider uppercase text-[10px] flex items-center gap-1">
+                  <History className="w-3 h-3" /> Historical Playback
+                </div>
+                <div className="grid grid-cols-4 gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                  {[
+                    { label: "Live", val: 0 },
+                    { label: "-12h", val: 1 },
+                    { label: "-24h", val: 2 },
+                    { label: "-36h", val: 3 },
+                  ].map((t) => (
+                    <button
+                      key={t.val}
+                      onClick={() => setSstOffset(t.val)}
+                      className={`text-[10px] font-medium py-1 rounded-md transition-all ${
+                        sstOffset === t.val
+                          ? "bg-cyan-600 text-white shadow-md font-semibold"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         <button
           onClick={() => setShowMap((v) => !v)}
