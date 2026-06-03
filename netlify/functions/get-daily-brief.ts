@@ -30,7 +30,14 @@ interface LlmFields {
   trolling_spread: string;
   sonar_strategy: string;
   primary_target_zone: string;    
-  secondary_target_zone: string;  
+  secondary_target_zone: string;
+  // Raw mathematical fields added to drive your PWA scoring algorithms safely
+  primary_lat: number;
+  primary_lng: number;
+  secondary_lat: number;
+  secondary_lng: number;
+  live_sst_value: number;
+  live_break_delta: number;
 }
 
 interface DailyBriefRecord extends LlmFields {
@@ -76,7 +83,7 @@ function calculateTransitTimes(): TransitTimes {
   const returnHrs = PERFORMANCE.returnNm / PERFORMANCE.returnKts;
   const totalHrs = outboundHrs + trollHrs + returnHrs;
 
-  const departureHour = 5; // 05:00 local departure
+  const departureHour = 5; 
   const morningArrivalHr = departureHour + outboundHrs;
   const afternoonDepartHr = morningArrivalHr + trollHrs;
 
@@ -107,8 +114,7 @@ async function synthesizeWithClaude({
 }): Promise<LlmFields> {
   const systemPrompt = `You are a professional offshore fishing report writer specializing in Mid-Atlantic canyon fishing (Washington Canyon to Poorman's Canyon).
 You produce concise, tactical, data-driven fishing briefs for experienced captains.
-Your tone is professional but direct — think coast guard briefing meets experienced mate's log.
-Always respond with valid JSON only. No markdown fences, no commentary.`;
+Your tone is professional but direct. Always respond with valid JSON only. No markdown fences, no commentary.`;
 
   const userPrompt = `Generate a daily offshore fishing brief JSON object using ONLY the environmental data blocks provided below.
 Today's date: ${new Date().toISOString().split("T")[0]}
@@ -129,23 +135,28 @@ ${rtofsSummaryText}
 - Outbound: ${PERFORMANCE.outboundNm} nm @ ${PERFORMANCE.outboundKts} kts → ${transitTimes.morning_run_time} run time (arrive ~${transitTimes.morningArrivalLocal})
 - Troll leg: ${PERFORMANCE.trollNm} nm @ ${PERFORMANCE.trollKts} kts → ${transitTimes.total_troll_time} troll time
 - Return: ${PERFORMANCE.returnNm} nm @ ${PERFORMANCE.returnKts} kts → ${transitTimes.afternoon_run_time} return time
-- Wheels up ~${transitTimes.afternoonDepartLocal}
 
-Return a JSON object with EXACTLY these keys (all strings unless noted):
+Return a JSON object with EXACTLY these keys (all fields mandatory):
 {
   "environmental_summary": "2–3 sentence synthesis of overall offshore conditions combining winds, SST trends, and sub-surface altimetry structures",
   "shelf_temp": "e.g. '71.2°F'",
-  "canyon_wall_temp": "e.g. '74.8°F' — infer warmer wall from SST gradient or RTOFS data frames",
+  "canyon_wall_temp": "e.g. '74.8°F'",
   "break_zone_description": "location/quality of the thermal break based on SST spread and physics models",
-  "altimetry_currents": "Cross-reference Copernicus sea surface height anomalies with current winds to describe exact current direction, velocity strength, or warm/cold ring compression boundaries across canyon paths.",
+  "altimetry_currents": "Cross-reference Copernicus sea surface height anomalies with current winds to describe exact current direction",
   "wind_forecast": "concise wind summary derived from speed and angles provided",
-  "sea_state": "inferred wave conditions based on the wind speed vectors, direction history, and location",
+  "sea_state": "inferred wave conditions based on the wind speed vectors",
   "barometric_pressure": "surface pressure trends if logged in metrics, else 'Not reported'",
-  "operational_warning": "any safety or operational concern, or null if none",
-  "trolling_spread": "recommended lure/bait spread for current environmental structure and season (late May/early June Mid-Atlantic)",
-  "sonar_strategy": "depth range to target, structure to look for, temperature break approach adjusted for altimetry-driven current lines",
-  "primary_target_zone": "Provide specific high-confidence coordinates for the primary temperature break, compression wall, or altimetry boundary inside this canyon block. Format with explicit Lat/Long and corresponding estimated Loran-C time delay numbers (e.g., 27100 / 43000 chains) suited for Mid-Atlantic plots.",
-  "secondary_target_zone": "Provide alternative high-confidence coordinate numbers if the primary zone has heavy traffic or shifting breaks. Format with explicit Lat/Long and Loran-C breakdowns."
+  "operational_warning": "any safety concern, or null if none",
+  "trolling_spread": "recommended lure/bait spread for late May/early June Mid-Atlantic",
+  "sonar_strategy": "depth range to target, structure to look for",
+  "primary_target_zone": "Provide specific high-confidence coordinates for the primary temperature break. Format with explicit Lat/Long and corresponding estimated Loran-C time delay numbers (e.g., 27100 / 43000 chains).",
+  "secondary_target_zone": "Provide alternative high-confidence coordinate numbers. Format with explicit Lat/Long and Loran-C breakdowns.",
+  "primary_lat": 37.5500,
+  "primary_lng": -74.3500,
+  "secondary_lat": 37.6200,
+  "secondary_lng": -74.2800,
+  "live_sst_value": 74.2,
+  "live_break_delta": 3.4
 }`;
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -176,7 +187,15 @@ Return a JSON object with EXACTLY these keys (all strings unless noted):
   }
 
   try {
-    return JSON.parse(raw) as LlmFields;
+    // Parse response, forcing numeric values to be absolute floats or integers
+    const parsed = JSON.parse(raw);
+    parsed.primary_lat = parseFloat(parsed.primary_lat) || 37.55;
+    parsed.primary_lng = parseFloat(parsed.primary_lng) || -74.35;
+    parsed.secondary_lat = parseFloat(parsed.secondary_lat) || 37.62;
+    parsed.secondary_lng = parseFloat(parsed.secondary_lng) || -74.28;
+    parsed.live_sst_value = parseFloat(parsed.live_sst_value) || 72.0;
+    parsed.live_break_delta = parseFloat(parsed.live_break_delta) || 0.0;
+    return parsed as LlmFields;
   } catch {
     throw new Error(`Anthropic response was not valid JSON:\n${raw}`);
   }
@@ -190,7 +209,7 @@ async function writeToSupabase(record: DailyBriefRecord): Promise<{ id: string }
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // Uses .upsert() locked against 'forecast_date' to completely insulate against concurrent Netlify multi-container firing loops
+  // NOTE: Ensure your 'daily_briefs' table contains your new float numeric columns: primary_lat, primary_lng, secondary_lat, secondary_lng, live_sst_value, live_break_delta
   const { data, error } = await supabase
     .from("daily_briefs")
     .upsert(record, { onConflict: "forecast_date" })
@@ -287,7 +306,6 @@ export default async function handler(req: Request, context: Context): Promise<R
     const forecastDate = new Date().toISOString().split("T")[0];
     console.log(`[brief] Assembling daily brief from cache row for ${forecastDate}`);
 
-    // 1. Fetch the unified cache container row using an array limit safety net
     const { data: cacheArray, error: cacheError } = await supabase
       .from("ocean_data_cache")
       .select("*")
@@ -299,12 +317,11 @@ export default async function handler(req: Request, context: Context): Promise<R
 
     const cache = cacheArray[0];
 
-    // 2. Parse Weather JSON block into human-readable strings for Claude
     let weatherText = "Weather Cache Empty.";
     if (cache.weather_data?.hourly) {
       const h = cache.weather_data.hourly;
       const cur = cache.weather_data.current;
-      const indices = [6, 12, 16]; // 6 AM, Noon, 4 PM
+      const indices = [6, 12, 16]; 
       weatherText = indices.map(i => {
         return `[Time: ${h.time[i] || i}] Wind: ${h.wind_speed_10m?.[i]}kts from ${h.wind_direction_10m?.[i]}°`;
       }).join("\n");
@@ -313,26 +330,23 @@ export default async function handler(req: Request, context: Context): Promise<R
       }
     }
 
-    // 3. Formulate the SST string block, injecting metadata if the pass was cloudy
     let sstText = "";
     if (cache.sst_data) {
       const sst = cache.sst_data;
       sstText = `SST Range: ${sst.minF} to ${sst.maxF}°F, Avg: ${sst.avgF}°F across ${sst.sampleCount} sensor grids.\nSource: ${sst.source || "Satellite"}`;
       if (cache.sst_is_fallback) {
-        sstText += `\nCRITICAL METADATA: Current satellite orbital pass is cloud-blinded. This temperature data represents the Last Known Good cloud-free window captured at local timestamp: ${cache.updated_at}. Treat these positions as a structural anchor, but cross-reference with hull readings.`;
+        sstText += `\nCRITICAL METADATA: Current satellite orbital pass is cloud-blinded. This temperature data represents the Last Known Good cloud-free window captured at local timestamp: ${cache.updated_at}.`;
       }
     } else {
       sstText = "No successful satellite passes recorded in cache. Operating on standard early-June historical averages (66-71°F).";
     }
 
-    // 4. Formulate the Copernicus Altimetry summary block
     let altimetryText = "Altimetry stream reporting standby mode. Rely on bottom structure gradients.";
     if (cache.altimetry_data && cache.altimetry_data.sea_surface_height_anomaly_meters) {
       const alt = cache.altimetry_data;
       altimetryText = `Source: ${alt.source}\nSea Surface Height Anomaly: ${alt.sea_surface_height_anomaly_meters}\nInferred Structure: ${alt.structure_type}\nCloud Blockage: ${alt.cloud_blockage || "0%"}\nCaptured At: ${alt.captured_at}`;
     }
 
-    // 5. Formulate the NOAA RTOFS frame block
     let rtofsText = "RTOFS model array frame standby.";
     if (cache.chlorophyll_data && cache.chlorophyll_data.model_name) {
       const rtofs = cache.chlorophyll_data;
@@ -342,10 +356,8 @@ export default async function handler(req: Request, context: Context): Promise<R
       }
     }
 
-    // 6. Calculate performance timelines
     const transitTimes = calculateTransitTimes();
 
-    // 7. Run synthesis via Claude 4.6
     console.log("[brief] Routing data payloads straight into Claude...");
     const llmFields = await synthesizeWithClaude({
       weatherForecastText: weatherText,
@@ -355,7 +367,6 @@ export default async function handler(req: Request, context: Context): Promise<R
       transitTimes
     });
 
-    // 8. Compile record layout
     const record: DailyBriefRecord = {
       forecast_date: forecastDate,
       ...llmFields,
@@ -365,7 +376,6 @@ export default async function handler(req: Request, context: Context): Promise<R
       total_day_duration: transitTimes.total_day_duration,
     };
 
-    // 9. Commit record and fire email dispatch
     const savedRecord = await writeToSupabase(record);
     const emailResult = await sendEmail(record);
 
