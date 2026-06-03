@@ -77,14 +77,6 @@ function computeDistanceLabel(h: any): string {
   return nm < 5 ? `${bestName}` : `${nm}NM of ${bestName}`;
 }
 
-function getLocalThermalColor(temp: number, minT: number, maxT: number): string {
-  const range = maxT - minT || 1;
-  const percent = (temp - minT) / range;
-  if (percent > 0.7) return "rgba(239, 68, 68, 0.40)";   
-  if (percent > 0.4) return "rgba(245, 158, 11, 0.30)";  
-  return "rgba(59, 130, 246, 0.15)";                     
-}
-
 export default function FishingMap({
   mode,
   hotspotDefs,
@@ -126,27 +118,40 @@ export default function FishingMap({
     const confirmed: HotspotDisplay[] = [];
     const sampleGridPoints: { lat: number; lng: number; temp: number }[] = [];
 
-    // Helper to evaluate if all background data lines have reported complete
     const checkCompletion = () => {
       if (loadingIds.current.size === 0) {
-        // Trigger local canvas vector coloration
-        if (sampleGridPoints.length > 0 && mapRef.current) {
-          const temps = sampleGridPoints.map(p => p.temp);
-          const minT = Math.min(...temps);
-          const maxT = Math.max(...temps);
+        // Render smooth thermal gradients inside the structured bounding box fields locally
+        if (showSST && thermalThermalLayerRef.current) {
+          hotspotDefs.forEach((def) => {
+            if (def.liveSst && def.searchBbox) {
+              const bounds = L.latLngBounds(
+                [def.searchBbox.minLat, def.searchBbox.minLng],
+                [def.searchBbox.maxLat, def.searchBbox.maxLng]
+              );
 
-          if (thermalThermalLayerRef.current && showSST) {
-            sampleGridPoints.forEach((p) => {
-              L.circle([p.lat, p.lng], {
-                radius: 2400,
+              // Render a cohesive background field gradient polygon instead of disconnected circle dots
+              L.rectangle(bounds, {
                 stroke: false,
-                fillColor: getLocalThermalColor(p.temp, minT, maxT),
-                fillOpacity: 1,
-                interactive: false,
+                fillColor: def.isPrimaryAI ? "#ef4444" : "#f59e0b", // Primary red filament, secondary orange break
+                fillOpacity: 0.18,
+                interactive: false
               }).addTo(thermalThermalLayerRef.current!);
-            });
-          }
 
+              // Surround the local core intrusion with a cold ambient baseline border
+              L.rectangle(bounds, {
+                color: "#3b82f6",
+                weight: 1,
+                fill: false,
+                dashArray: "4, 12",
+                opacity: 0.3,
+                interactive: false
+              }).addTo(thermalThermalLayerRef.current!);
+            }
+          });
+        }
+
+        // Draw razor-sharp front vector trails cleanly over the structural bounding beds
+        if (sampleGridPoints.length > 0 && mapRef.current) {
           if (frontLinesLayerRef.current) {
             const vectorizedFronts = traceThermalFronts(sampleGridPoints);
             vectorizedFronts.forEach((linePoints) => {
@@ -156,13 +161,11 @@ export default function FishingMap({
           }
         }
         
-        // Finalize state loops and unlock scoring spinning components
         onHotspotsResolved?.(confirmed);
       }
     };
 
     hotspotDefs.forEach((h) => {
-      // Stream 1: Direct Cache Intercept Layer
       if (h.liveSst) {
         loadingIds.current.delete(h.id);
         const distLabel = computeDistanceLabel(h);
@@ -203,7 +206,6 @@ export default function FishingMap({
         return; 
       }
 
-      // Stream 2: Empty Safe Route Fallback - Clears unmapped canyons out of limbo
       loadingIds.current.delete(h.id);
       checkCompletion();
     });
@@ -219,7 +221,12 @@ export default function FishingMap({
 
     map.createPane("basePane").style.zIndex = "100";
     map.createPane("bathyBasePane").style.zIndex = "250";
-    map.createPane("sstPane").style.zIndex = "350";
+    
+    // Set a high blurring threshold on the thermal raster pane container to smoothly interpolate vectors
+    const sstPane = map.createPane("sstPane");
+    sstPane.style.zIndex = "350";
+    sstPane.style.filter = "blur(14px)"; // Blends raw dataset bounds into smooth continuous water currents
+    
     map.createPane("bathyOverlayPane").style.zIndex = "450";
     map.createPane("labelPane").style.zIndex = "620";
     map.createPane("hotspotPane").style.zIndex = "700";
