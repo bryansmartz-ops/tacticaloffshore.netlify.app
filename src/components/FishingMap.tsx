@@ -53,7 +53,7 @@ const BATHY_BASE_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Oc
 const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
 const EMPTY_SIGNALS = { sstScore: 0, sstBreakScore: 0, chloroScore: 0, altimetryScore: 0, historyReportsScore: 0 };
 
-// REMOVED "www." — Resolved net::ERR_NAME_NOT_RESOLVED routing crash
+// Fixed 404 router mismatch: Point cleanly to the global CoastWatch ERDDAP WMS mapping dispatcher
 const NOAA_WMS_BASE_URL = "https://coastwatch.noaa.gov/erddap/wms/noaacwVHNsstLines3Day/request";
 
 function rankBadge(id: string, hotspots: HotspotDisplay[]): string {
@@ -216,8 +216,9 @@ export default function FishingMap({
     const bathyOverlay = L.tileLayer(BATHY_OVERLAY_TILE, { opacity: 0.9, pane: "bathyOverlayPane", maxNativeZoom: 10, maxZoom: 14 });
     bathyOverlayRef.current = bathyOverlay; bathyOverlay.addTo(map);
 
+    // Consolidated WMS properties specifically targeting the internal variable names
     const sstLayer = L.tileLayer.wms(NOAA_WMS_BASE_URL, {
-      layers: "noaacwVHNsstLines3Day:sst",
+      layers: "sst", // Under WMS protocol specs, just request the target parameter layer name directly
       format: "image/png",
       transparent: true,
       version: "1.3.0",
@@ -226,7 +227,7 @@ export default function FishingMap({
       pane: "sstPane",
       colorscalerange: "16.0,23.2",
       palette: "Jet",
-      styles: "Image,Scale,Box"
+      styles: "raster"
     });
     
     sstLayerRef.current = sstLayer; sstLayer.addTo(map);
