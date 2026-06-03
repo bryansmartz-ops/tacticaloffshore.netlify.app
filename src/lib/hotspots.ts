@@ -4,21 +4,21 @@
  *
  * CONFIDENCE SCORING — five weighted signal buckets (max 100 pts total):
  *
- *  ┌─────────────────────────────┬──────┬────────────────────────────────────────────────────┐
- *  │ Bucket                      │ Max  │ Rule                                               │
- *  ├─────────────────────────────┼──────┼────────────────────────────────────────────────────┤
- *  │ SST break sharpness         │  35  │ PRIMARY signal. Linear: full pts at ΔT ≥ 3°F;      │
- *  │                             │      │ 0 pts at ΔT = 0 — sharp thermal fronts concentrate  │
- *  │                             │      │ bait and pelagics far better than SST proximity     │
- *  │ SST proximity               │  20  │ Linear: full pts when SST within ±1°F of ideal;    │
- *  │                             │      │ ramps to 0 at ±6°F from ideal for target species   │
- *  │ Chlorophyll concentration   │  20  │ Log-scale: full pts ≥ 0.3 mg/m³ (bloom level);    │
- *  │                             │      │ 0 pts at ≤ 0.02 mg/m³ (open ocean desert)          │
- *  │ Altimetry / SSH anomaly     │  15  │ Positive SSH anomaly (warm eddy): full pts ≥+10cm; │
- *  │                             │      │ negative (cold core) = 0 pts                       │
- *  │ History + reports           │  10  │ Static prior: historical catch frequency + any      │
- *  │                             │      │ current fishing report intel (0–10 pts)             │
- *  └─────────────────────────────┴──────┴────────────────────────────────────────────────────┘
+ * ┌─────────────────────────────┬──────┬────────────────────────────────────────────────────┐
+ * │ Bucket                      │ Max  │ Rule                                               │
+ * ├─────────────────────────────┼──────┼────────────────────────────────────────────────────┤
+ * │ SST break sharpness         │  35  │ PRIMARY signal. Linear: full pts at ΔT ≥ 3°F;      │
+ * │                             │      │ 0 pts at ΔT = 0 — sharp thermal fronts concentrate  │
+ * │                             │      │ bait and pelagics far better than SST proximity     │
+ * │ SST proximity               │  20  │ Linear: full pts when SST within ±1°F of ideal;    │
+ * │                             │      │ ramps to 0 at ±6°F from ideal for target species   │
+ * │ Chlorophyll concentration   │  20  │ Log-scale: full pts ≥ 0.3 mg/m³ (bloom level);     │
+ * │                             │      │ 0 pts at ≤ 0.02 mg/m³ (open ocean desert)          │
+ * │ Altimetry / SSH anomaly     │  15  │ Positive SSH anomaly (warm eddy): full pts ≥+10cm; │
+ * │                             │      │ negative (cold core) = 0 pts                       │
+ * │ History + reports           │  10  │ Static prior: historical catch frequency + any      │
+ * │                             │      │ current fishing report intel (0–10 pts)            │
+ * └─────────────────────────────┴──────┴────────────────────────────────────────────────────┘
  *
  * Composite score is clamped to [40, 95] to avoid false extremes.
  */
@@ -68,65 +68,14 @@ export function toLoranTD(lat: number, lng: number): { w: string; x: string } {
 // Multi-factor signal interface
 // ---------------------------------------------------------------------------
 
-/**
- * Five-bucket signal breakdown for a single hotspot evaluation.
- * Each field is 0 when the signal has not yet been fetched (optimistic default).
- */
 export interface HotspotSignals {
-  /**
-   * SST break sharpness score (0–35 pts). ← PRIMARY discriminator.
-   * Full 35 pts when hotSST − ambientSST ≥ 3°F (GS-intrusion threshold).
-   * Linear from 0 pts (no break) to 35 pts at ΔT = 3°F.
-   * A sharp thermal front concentrates bait and pelagics more reliably than
-   * absolute SST proximity — raised to 35 to reflect this primacy.
-   */
   sstBreakScore: number;
-
-  /**
-   * SST proximity score (0–20 pts).
-   * Full 20 pts when live SST is within ±1°F of the target species' ideal range centre.
-   * Linear decay to 0 pts at ±6°F from the ideal — captures "right temp" vs "off-temp" quality.
-   */
   sstScore: number;
-
-  /**
-   * Chlorophyll-a concentration score (0–20 pts).
-   * Derived from MODIS/VIIRS satellite imagery (mg/m³).
-   * Scoring (log-scaled):
-   *   ≥ 0.30 mg/m³ → 20 pts  (coastal bloom / rich feeding conditions)
-   *   0.10–0.30     → 10–20 pts (linear interpolation)
-   *   0.02–0.10     → 0–10 pts  (oligotrophic / open ocean)
-   *   < 0.02        → 0 pts
-   * High chlorophyll → bait aggregation → predator concentration.
-   */
   chloroScore: number;
-
-  /**
-   * Altimetric sea surface height anomaly score (0–15 pts).
-   * Derived from CMEMS / Copernicus satellite altimetry (cm SSH anomaly).
-   * Positive SSH = warm-core eddy / convergence → favours pelagics.
-   * Scoring:
-   *   ≥ +10 cm → 15 pts
-   *   0 to +10 cm → linear 0–15 pts
-   *   < 0 cm (cold-core / divergence) → 0 pts
-   */
   altimetryScore: number;
-
-  /**
-   * Historical catch frequency + current fishing report intelligence (0–10 pts).
-   * Static prior set per hotspot based on multi-year species distribution records
-   * and any parsed fishing reports (Hatteras to OC, MD range).
-   * Updated manually or via future report-scraping pipeline.
-   * Scaled down from 15 → 10 to make live thermal-break signal (sstBreakScore)
-   * the dominant factor — history is a tiebreaker, not the headline number.
-   *   9–10 pts: known high-percentage grounds (e.g. Diamond Shoals YFT in summer)
-   *    5–8 pts:  seasonally productive with moderate historical data
-   *    0–4 pts:  limited records or low historical hit rate
-   */
   historyReportsScore: number;
 }
 
-/** Zero-filled signals object — used before any live fetch completes */
 export const EMPTY_SIGNALS: HotspotSignals = {
   sstScore: 0,
   sstBreakScore: 0,
@@ -139,7 +88,6 @@ export const EMPTY_SIGNALS: HotspotSignals = {
 // SST-based scoring helpers
 // ---------------------------------------------------------------------------
 
-/** Derive likely species from SST in °F */
 export function speciesFromSST(tempF: number): string[] {
   const list: string[] = [];
   if (tempF >= 60 && tempF <= 68) list.push("Bluefin Tuna");
@@ -152,32 +100,13 @@ export function speciesFromSST(tempF: number): string[] {
   return list.slice(0, 3);
 }
 
-/**
- * Compute individual SST signals from live temperatures.
- *
- * @param tempF      Live hotspot SST in °F
- * @param breakDelta hotSST − ambientSST in °F (clamped ≥ 0 before calling)
- * @param idealF     Target species ideal SST centre in °F (default 72°F — mid-range pelagic)
- *
- * Returns `sstScore` and `sstBreakScore` ready to merge into a `HotspotSignals` object.
- *
- * SST proximity window: ±1°F = full 20 pts; decays to 0 at ±6°F.
- * Max reduced 25 → 20 because break sharpness is now the primary signal.
- *
- * Break sharpness: Gulf Stream intrusion events produce breaks of 3–6°F;
- * full 35 pts at ΔT ≥ 3°F — weight raised 25 → 35 to make thermal fronts
- * the dominant confidence discriminator between hotspots.
- */
 export function computeSSTSignals(
   tempF: number,
   breakDelta: number,
   idealF = 72,
 ): Pick<HotspotSignals, "sstScore" | "sstBreakScore"> {
-  // SST proximity: full 20 pts within ±1°F of ideal; 0 pts at ±6°F
   const deviation = Math.abs(tempF - idealF);
   const sstScore = Math.max(0, Math.min(20, ((6 - deviation) / 5) * 20));
-
-  // Break sharpness: full 35 pts at ΔT ≥ 3°F (GS intrusion threshold) — PRIMARY signal
   const sstBreakScore = Math.max(0, Math.min(35, (breakDelta / 3) * 35));
 
   return {
@@ -186,40 +115,19 @@ export function computeSSTSignals(
   };
 }
 
-/**
- * Score chlorophyll concentration (mg/m³) → 0–20 pts (log-scaled).
- *
- * < 0.02  mg/m³ → 0 pts
- * 0.10    mg/m³ → ~7 pts
- * 0.30    mg/m³ → 20 pts (full)
- * > 0.30  mg/m³ → capped at 20 pts
- */
 export function computeChloroScore(chloroMgM3: number): number {
   if (chloroMgM3 <= 0.02) return 0;
-  // Map log10(0.02)=−1.699 … log10(0.30)=−0.523 onto 0–20
   const lo = Math.log10(0.02);
   const hi = Math.log10(0.3);
   const val = Math.log10(Math.max(0.02, chloroMgM3));
   return Math.round(Math.max(0, Math.min(20, ((val - lo) / (hi - lo)) * 20)));
 }
 
-/**
- * Score SSH anomaly in cm → 0–15 pts.
- * Negative anomalies (cold eddy) score 0.
- * Linear 0→15 over 0→+10 cm positive anomaly.
- */
 export function computeAltimetryScore(sshAnomalyCm: number): number {
   if (sshAnomalyCm <= 0) return 0;
   return Math.round(Math.min(15, (sshAnomalyCm / 10) * 15));
 }
 
-/**
- * Composite confidence % from a fully-populated HotspotSignals object.
- * Sum of all five buckets (max 100), clamped to [40, 95].
- *
- * Backward-compat: also accepts legacy (tempF, breakDelta) signature so
- * existing callers continue to work until Step 2 migrates them.
- */
 export function computeConfidence(signals: HotspotSignals): number;
 export function computeConfidence(tempF: number, breakDelta: number): number;
 export function computeConfidence(
@@ -227,7 +135,6 @@ export function computeConfidence(
   breakDelta?: number,
 ): number {
   if (typeof signalsOrTempF === "number") {
-    // Legacy path — build minimal signals from SST only
     const { sstScore, sstBreakScore } = computeSSTSignals(
       signalsOrTempF,
       breakDelta ?? 0,
@@ -240,11 +147,9 @@ export function computeConfidence(
       historyReportsScore: 0,
     };
     const raw = legacySignals.sstScore + legacySignals.sstBreakScore;
-    // Keep the old range feel (base 50) for the legacy path
     return Math.round(Math.min(95, Math.max(40, 50 + raw)));
   }
 
-  // New path — sum all five buckets
   const s = signalsOrTempF;
   const raw =
     s.sstScore +
@@ -261,151 +166,54 @@ export function confidenceColor(c: number): string {
   return "#f87171";
 }
 
-// ---------------------------------------------------------------------------
-// Chlorophyll + Altimetry signal fetchers (proxy-backed, with static fallback)
-// ---------------------------------------------------------------------------
-
-/**
- * Estimate a chlorophyll score (0–20) from SST proxy data.
- *
- * Physics-informed model:
- *   - The Gulf Stream THERMAL EDGE (steep ΔT break) is the primary chloro signal:
- *     nutrient-rich shelf water mixes with warm GS water at the front → phytoplankton bloom.
- *   - Cooler shelf-break SST (60–70°F) with a sharp break = highest chloro.
- *   - Strong break (ΔT ≥ idealBreakDeltaF) is a direct proxy for frontal mixing.
- *   - Warm, quiescent GS interior (SST > 80°F, low break) = oligotrophic desert.
- *
- * @param tempF            Live hotspot SST in °F
- * @param breakDelta       hotSST − ambientSST in °F
- * @param idealBreakDeltaF Site-calibrated ideal break threshold (default 3°F).
- *                         Sourced from HotspotDef.siteIdealBreakDeltaF so each
- *                         canyon is rewarded at its own expected GS-intrusion ΔT.
- *
- * When a real MODIS/VIIRS chlorophyll endpoint is wired, replace this function body.
- */
 export function estimateChloroScore(
   tempF: number,
   breakDelta: number,
   idealBreakDeltaF = 3,
 ): number {
-  // Base score from temperature band
   let base = 0;
-  if (tempF < 64)
-    base = 15; // cool shelf/upwelling — richest nutrients
+  if (tempF < 64) base = 15;
   else if (tempF < 68) base = 13;
   else if (tempF < 72) base = 10;
-  else if (tempF < 76)
-    base = 8; // warm shelf edge — still productive near the front
+  else if (tempF < 76) base = 8;
   else if (tempF < 80) base = 5;
-  else base = 2; // warm GS interior — oligotrophic
+  else base = 2;
 
-  // Break sharpness is the PRIMARY frontal mixing proxy — up to 7 bonus pts.
-  // Scale bonus against the site's own ideal break threshold:
-  //   breakDelta / idealBreakDeltaF → ratio capped at 1.0 → maps to 0–7 pts
-  // Norfolk (idealBreak=4.5°F) reaches full bonus at 4.5°F ΔT instead of 3°F,
-  // ensuring it scores proportionally higher when an actual 4–5°F break is observed.
   const breakRatio = idealBreakDeltaF > 0 ? breakDelta / idealBreakDeltaF : 0;
   const breakBonus = Math.min(7, breakRatio * 7);
 
   return Math.round(Math.min(20, base + breakBonus));
 }
 
-/**
- * Estimate an altimetry / SSH anomaly score (0–15) from available data.
- *
- * Gulf Stream thermal-edge heuristic (physics basis):
- *   - The GS meander can push warm water as far north as 38–40°N near the shelf break
- *     (Norfolk/Washington canyon area). When SST is ELEVATED above the site's
- *     seasonal baseline AND there is a detectable thermal break, this strongly
- *     indicates a warm-core eddy or GS meander pushing into that canyon system.
- *   - Key insight: for mid-latitude sites (36–40°N), a RELATIVE elevation
- *     above ambient (breakDelta) is MORE diagnostic than absolute SST alone,
- *     because it confirms warm GS water intruding onto the shelf.
- *   - Latitude bonus: the GS shelf-break interaction zone runs 35–41°N;
- *     Norfolk (37°N) and Washington (37.5°N) are squarely in this zone and
- *     should score high when warm water pushes north.
- *
- * @param tempF            Live hotspot SST in °F
- * @param breakDelta       hotSST − ambientSST in °F
- * @param lat              Hotspot latitude (degrees N)
- * @param idealBreakDeltaF Site-calibrated ideal break threshold (default 3°F).
- *                         Sourced from HotspotDef.siteIdealBreakDeltaF — each
- *                         canyon earns its break bonus at its own calibrated ΔT
- *                         rather than a fixed global 3°F floor.
- *
- * When a real CMEMS/Copernicus altimetry endpoint is wired, replace this function body.
- */
 export function estimateAltimetryScore(
   tempF: number,
   breakDelta: number,
   lat: number,
   idealBreakDeltaF = 3,
 ): number {
-  // Latitude bonus: GS shelf-break interaction zone 35–41°N
-  // Peak bonus at 36–39°N (Norfolk → Spencer Canyon corridor)
   let latBonus = 0;
-  if (lat >= 36 && lat <= 39)
-    latBonus = 4; // prime GS meander corridor
-  else if (lat >= 35 && lat < 36)
-    latBonus = 3; // Hatteras / Diamond Shoals
-  else if (lat > 39 && lat <= 41)
-    latBonus = 2; // NJ/DE shelf — still active
-  else if (lat > 41) latBonus = 0; // north of GS influence
+  if (lat >= 36 && lat <= 39) latBonus = 4;
+  else if (lat >= 35 && lat < 36) latBonus = 3;
+  else if (lat > 39 && lat <= 41) latBonus = 2;
 
-  // Base score from absolute SST — warm absolute temp suggests GS water present
   let base = 0;
-  if (tempF >= 78)
-    base = 9; // clearly GS / warm-core ring water
+  if (tempF >= 78) base = 9;
   else if (tempF >= 74) base = 7;
-  else if (tempF >= 70)
-    base = 5; // marginal — may be shelf water
+  else if (tempF >= 70) base = 5;
   else if (tempF >= 66) base = 3;
   else base = 1;
 
-  // Break bonus: THIS IS THE KEY SIGNAL for GS intrusion at mid-latitudes.
-  // Scale against each site's calibrated ideal break threshold so Norfolk
-  // (idealBreak=4.5°F) reaches full bonus at 4.5°F ΔT rather than 3°F,
-  // producing a meaningful spread between genuinely sharp and marginal breaks.
-  // ΔT ≥ idealBreakDeltaF = strong GS intrusion signal → up to 4 bonus pts
   const breakRatio = idealBreakDeltaF > 0 ? breakDelta / idealBreakDeltaF : 0;
   const breakBonus = Math.min(4, breakRatio * 4);
 
   return Math.round(Math.min(15, base + breakBonus + latBonus));
 }
 
-// ---------------------------------------------------------------------------
-// Full signals builder — assembles all five buckets for a hotspot
-// ---------------------------------------------------------------------------
-
-/**
- * Build a complete HotspotSignals object from live SST + the hotspot definition.
- * Uses estimateChloroScore + estimateAltimetryScore as physics-informed stubs
- * until dedicated satellite product proxies are available.
- *
- * GS-INTRUSION MULTIPLIER (Step 3):
- * When warm Gulf Stream water actively pushes into the 35–39°N canyon corridor
- * AND a detectable thermal break exists (breakDelta ≥ 2°F), a bonus is added
- * directly to sstBreakScore (capped at the 35 pt max).
- *
- * Physics basis: The GS shelf-break interaction zone runs 35–41°N but is most
- * impactful in the 35–39°N band (Hatteras → Washington/Norfolk canyon area).
- * When the GS meanders north and injects warm water onto the shelf, the resulting
- * thermal front is steeper and more productive than a typical shelf-edge break.
- * ΔT ≥ 2°F at these latitudes is strong evidence of active GS intrusion — the
- * bonus rewards that signal and differentiates Norfolk/Washington from flatter sites.
- *
- * Bonus tiers (added to raw sstBreakScore before cap):
- *   ΔT ≥ 4°F in 35–39°N corridor → +6 pts  (strong intrusion — steep, productive front)
- *   ΔT ≥ 2°F in 35–39°N corridor → +3 pts  (moderate intrusion — confirmed break)
- *   ΔT ≥ 2°F in 39–41°N corridor → +1 pt   (northern edge — marginal GS influence)
- *   All other cases               → 0 pts   (no multiplier)
- */
 export function buildHotspotSignals(
   tempF: number,
   breakDelta: number,
   def: HotspotDef,
 ): HotspotSignals {
-  // Site-calibrated ideal break ΔT — fall back to global 3°F if not set
   const idealBreakDeltaF = def.siteIdealBreakDeltaF ?? 3;
 
   const { sstScore, sstBreakScore: rawBreakScore } = computeSSTSignals(
@@ -414,28 +222,19 @@ export function buildHotspotSignals(
     def.idealSstF,
   );
 
-  // GS-intrusion multiplier — bonus applied to sstBreakScore, capped at 35 pts max
   let gsBonus = 0;
   const lat = def.lat;
   if (lat >= 35 && lat < 39) {
-    // Prime GS meander corridor — Norfolk / Washington / Hatteras zone
     if (breakDelta >= 4) gsBonus = 6;
     else if (breakDelta >= 2) gsBonus = 3;
   } else if (lat >= 39 && lat <= 41) {
-    // Northern corridor — Spencer / Atlantis / Hudson — marginal GS influence
     if (breakDelta >= 2) gsBonus = 1;
   }
   const sstBreakScore = Math.min(35, rawBreakScore + gsBonus);
 
-  // Pass site-calibrated ideal break threshold into proxy scorers so each canyon
-  // is rewarded at its own expected GS-intrusion ΔT rather than a global 3°F floor.
   const chloroScore = estimateChloroScore(tempF, breakDelta, idealBreakDeltaF);
-  const altimetryScore = estimateAltimetryScore(
-    tempF,
-    breakDelta,
-    def.lat,
-    idealBreakDeltaF,
-  );
+  const altimetryScore = estimateAltimetryScore(tempF, breakDelta, def.lat, idealBreakDeltaF);
+  
   return {
     sstScore,
     sstBreakScore,
@@ -448,18 +247,9 @@ export function buildHotspotSignals(
 // ---------------------------------------------------------------------------
 // OC Inlet origin + 100 NM radius filter
 // ---------------------------------------------------------------------------
-
-/**
- * OC Inlet, Ocean City, MD — tournament departure origin.
- * All hotspot distances are measured from this point.
- * WGS-84: 38.3289°N, 75.0913°W
- */
 export const OC_INLET = { lat: 38.3289, lng: -75.0913 };
-
-/** Tournament radius limit in nautical miles */
 export const OC_RADIUS_NM = 100;
 
-/** Distance from OC Inlet to a hotspot in nautical miles */
 export function distFromOCInlet(lat: number, lng: number): number {
   return haversineNm(OC_INLET.lat, OC_INLET.lng, lat, lng);
 }
@@ -467,16 +257,6 @@ export function distFromOCInlet(lat: number, lng: number): number {
 // ---------------------------------------------------------------------------
 // Canonical hotspot definitions
 // ---------------------------------------------------------------------------
-
-/**
- * A search region bounding box used by the grid-scan break-finder.
- * The scanner sweeps this box at 0.1° resolution, finds the cell with the
- * sharpest thermal break, and only plots a hotspot marker if that cell's
- * confidence score exceeds minConfidence.
- *
- * Size guidance: ~1.0°×1.0° is sufficient for most canyon systems; widen
- * to ~1.2°×1.2° for highly mobile GS meander zones (e.g. Hatteras).
- */
 export interface SearchBbox {
   minLat: number;
   maxLat: number;
@@ -487,92 +267,21 @@ export interface SearchBbox {
 export interface HotspotDef {
   id: string;
   title: string;
-  /** Fallback SST °F used when ERDDAP is unavailable */
   fallbackSstF: number;
-  /**
-   * Fallback/label-anchor latitude — where to pin a label if the grid scan
-   * finds no break above minConfidence.  Optional: the scan result coordinates
-   * are used when a live break IS found.
-   */
   lat: number;
-  /**
-   * Fallback/label-anchor longitude — see lat above.
-   */
   lng: number;
-  /** Nearby ambient shelf point for computing breakDelta */
   ambientLat: number;
   ambientLng: number;
-  /**
-   * Search region for the grid-scan break-finder (Step 2+).
-   * Replaces the old single-pin + bboxPad approach.
-   * The scanner sweeps this region at 0.1° resolution, sampling hot-cell SST
-   * vs ambientLat/ambientLng, and returns the cell with the highest confidence.
-   */
   searchBbox: SearchBbox;
-  /**
-   * Minimum confidence score (0–100) required to plot this hotspot on the map.
-   * If the best cell found in searchBbox scores below this threshold the
-   * hotspot is suppressed entirely — no pin, no card.
-   * Default 60 — equivalent to at least a 3°F break + moderate SST proximity.
-   */
   minConfidence: number;
-  /**
-   * Static historical/reports prior (0–10 pts) contributing to historyReportsScore.
-   * Set at definition time; reflects multi-year catch frequency + current intel.
-   */
   historyPrior: number;
-  /**
-   * Ideal SST °F for the primary target species at this site.
-   * Used by computeSSTSignals() proximity calculation.
-   */
   idealSstF: number;
-  /**
-   * Site-calibrated ideal thermal break ΔT in °F (hotSST − ambientSST).
-   * Used by estimateChloroScore and estimateAltimetryScore to reward each
-   * canyon at its own expected GS-intrusion threshold rather than a global 3°F floor.
-   *
-   * Calibration guide:
-   *   5–6°F: Hatteras (Diamond Shoals) — GS pinch zone, steepest mid-shelf breaks
-   *   4–5°F: Norfolk / Washington Canyon — prime GS intrusion corridor
-   *   3–4°F: Baltimore / Spencer / Wilmington — productive but softer breaks
-   *   2–3°F: Hudson / Atlantis — northern shelf; GS influence less direct
-   *
-   * Defaults to 3.0°F if not set (preserves previous behaviour for any hotspot
-   * that has not been explicitly calibrated).
-   */
   siteIdealBreakDeltaF?: number;
-  /**
-   * Last-computed five-bucket signal breakdown.
-   * Populated at runtime by the signal-fetch layer (Step 2).
-   * Displayed in UI tooltips and hotspot detail cards.
-   */
   signals?: HotspotSignals;
 }
 
-/**
- * Penalty applied to confidence when live SST could not be retrieved and the
- * hardcoded fallbackSstF was used instead.
- *
- * NOTE: As of Step 1 of the "No-Fallback" plan, the penalty approach has been
- * REPLACED by full exclusion — hotspots whose ERDDAP fetch fails are now
- * removed from the resolved list entirely rather than being shown with a deducted
- * score.  This constant is kept for backward-compat imports but is no longer
- * applied anywhere in FishingMap.tsx.
- *
- * @deprecated — use isFallbackSst exclusion logic in FishingMap instead.
- */
-export const FALLBACK_SST_CONFIDENCE_PENALTY = 0; // was 18 — zeroed so stale callers do no harm
-
-/**
- * Pre-filtered, confidence-sorted subset of HOTSPOT_DEFS.
- * Only includes hotspots within OC_RADIUS_NM (100 NM) of OC Inlet.
- * Sorted descending by fallback confidence so the list and map always
- * surface the best fishable targets first.
- *
- * NOTE: This array is computed once at module load using fallback SSTs.
- * The Hotspots section re-sorts after live SST predictions arrive.
- */
-export let HOTSPOTS_IN_RANGE: HotspotDef[] = []; // populated immediately after HOTSPOT_DEFS below
+export const FALLBACK_SST_CONFIDENCE_PENALTY = 0; 
+export let HOTSPOTS_IN_RANGE: HotspotDef[] = []; 
 
 export const HOTSPOT_DEFS: HotspotDef[] = [
   // ── North: NJ / Hudson ──────────────────────────────────────────────────
@@ -584,14 +293,8 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lng: -72.05,
     ambientLat: 39.52,
     ambientLng: -72.8,
-    /**
-     * Search region: ~1.0°×1.0° band along the Hudson shelf break (39–40°N).
-     * The GS warm tongue typically pushes to the canyon head between 39.1–40.0°N.
-     * Eastern edge -71.5 captures GS interior; western edge -73.0 is well into
-     * cooler shelf water — scanner finds the break cell within this window.
-     */
     searchBbox: { minLat: 39.0, maxLat: 40.0, minLng: -73.0, maxLng: -71.5 },
-    minConfidence: 58, // northern shelf — softer GS breaks; slightly lower bar
+    minConfidence: 58, 
     idealSstF: 70,
     siteIdealBreakDeltaF: 2.5,
     historyPrior: 10,
@@ -599,18 +302,12 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
   // ── OC, MD / Delaware area ──────────────────────────────────────────────
   {
     id: "6",
-    title: "Spencer Canyon (OC, MD)",
+    title: "Spencer Canyon",
     fallbackSstF: 75,
     lat: 39.05,
     lng: -72.7,
     ambientLat: 38.9,
     ambientLng: -73.45,
-    /**
-     * Search region: OC/DE shelf-break corridor (38.7–39.5°N).
-     * Spencer, Poorman's, and the surrounding edge all sit in this band.
-     * The warm filament typically enters from the SE — scan captures its
-     * leading edge wherever it actually is today.
-     */
     searchBbox: { minLat: 38.7, maxLat: 39.5, minLng: -73.5, maxLng: -71.8 },
     minConfidence: 60,
     idealSstF: 72,
@@ -625,10 +322,6 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lng: -72.25,
     ambientLat: 39.38,
     ambientLng: -73.0,
-    /**
-     * Search region: Atlantis / Lindenkohl shelf area (38.9–39.7°N).
-     * Overlaps Spencer to the south; scanner selects the highest-confidence cell.
-     */
     searchBbox: { minLat: 38.9, maxLat: 39.7, minLng: -73.0, maxLng: -71.6 },
     minConfidence: 58,
     idealSstF: 71,
@@ -644,11 +337,6 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lng: -74.05,
     ambientLat: 38.01,
     ambientLng: -74.8,
-    /**
-     * Search region: Baltimore / Wilmington shelf-break corridor (37.7–38.4°N).
-     * The GS warm finger that pushes into Baltimore typically tracks between
-     * 73.5°W and 72.5°W at this latitude — scanner covers that meander range.
-     */
     searchBbox: { minLat: 37.7, maxLat: 38.4, minLng: -74.8, maxLng: -73.2 },
     minConfidence: 60,
     idealSstF: 74,
@@ -663,11 +351,6 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lng: -73.42,
     ambientLat: 38.52,
     ambientLng: -74.15,
-    /**
-     * Search region: Wilmington Canyon shelf-break arc (38.2–38.9°N).
-     * Extends east enough (-72.5°W) to capture the offshore GS edge when
-     * the break has moved away from the canyon head.
-     */
     searchBbox: { minLat: 38.2, maxLat: 38.9, minLng: -74.2, maxLng: -72.5 },
     minConfidence: 58,
     idealSstF: 72,
@@ -682,38 +365,25 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lng: -74.35,
     ambientLat: 37.55,
     ambientLng: -75.5,
-    /**
-     * Search region: Washington / Norfolk canyon corridor (37.2–38.0°N).
-     * When the GS meanders north it can push warm water to 75.0°W or further;
-     * when it retreats the break falls back toward 73.5°W.
-     * The 1.2° latitude band captures both canyon heads in this corridor so the
-     * scanner finds the break wherever it actually sits today.
-     */
     searchBbox: { minLat: 37.2, maxLat: 38.0, minLng: -75.5, maxLng: -73.5 },
     minConfidence: 62,
     idealSstF: 73,
     siteIdealBreakDeltaF: 4.5,
     historyPrior: 10,
   },
-  // ── South: VA / Hatteras ─────────────────────────────────────────────────
+  // ── CRITICAL RE-MAPPING: ID 2 assigned directly to Poorman's Canyon ──────
   {
     id: "2",
-    title: "Norfolk Canyon Edge",
-    fallbackSstF: 72,
-    lat: 37.05,
-    lng: -74.65,
-    ambientLat: 37.05,
-    ambientLng: -75.65,
-    /**
-     * Search region: Norfolk Canyon shelf-break arc (36.7–37.5°N).
-     * GS intrusion events push warm water to 74.0–75.0°W; shelf-water break
-     * can sit anywhere in this 1°×1° window depending on meander phase.
-     * Kept slightly tighter than Washington so the two defs don't duplicate results.
-     */
-    searchBbox: { minLat: 36.7, maxLat: 37.5, minLng: -75.5, maxLng: -73.8 },
+    title: "Poorman's Canyon",
+    fallbackSstF: 73.8,
+    lat: 37.88, // Geographically anchored north/northeast of Washington Canyon
+    lng: -74.12,
+    ambientLat: 37.88,
+    ambientLng: -75.10,
+    searchBbox: { minLat: 37.6, maxLat: 38.2, minLng: -74.9, maxLng: -73.8 },
     minConfidence: 62,
-    idealSstF: 71,
-    siteIdealBreakDeltaF: 4.5,
+    idealSstF: 72,
+    siteIdealBreakDeltaF: 4.5, // Prime meander corridor calibration
     historyPrior: 9,
   },
   {
@@ -724,12 +394,6 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     lng: -75.2,
     ambientLat: 35.15,
     ambientLng: -75.95,
-    /**
-     * Search region: Hatteras GS pinch zone (34.8–36.0°N).
-     * The widest search region — the GS shifts dramatically here and the break
-     * can be anywhere between 74°W (close to shore) and 76°W (inner shelf).
-     * 1.2° latitude band ensures the scanner catches the break wherever it is.
-     */
     searchBbox: { minLat: 34.8, maxLat: 36.0, minLng: -76.2, maxLng: -74.0 },
     minConfidence: 60,
     idealSstF: 76,
@@ -739,9 +403,7 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Populate HOTSPOTS_IN_RANGE now that HOTSPOT_DEFS + helpers are all defined.
-// Filters to ≤ OC_RADIUS_NM (100 NM) from OC Inlet, sorted by fallback
-// confidence descending so both sections always show best targets first.
+// Pre-filter and sort initialization
 // ---------------------------------------------------------------------------
 HOTSPOTS_IN_RANGE = HOTSPOT_DEFS.filter(
   (h) => distFromOCInlet(h.lat, h.lng) <= OC_RADIUS_NM,
