@@ -32,20 +32,22 @@ export default async function handler(req: Request, context: Context): Promise<R
   const offset = parseInt(url.searchParams.get("offset") || "0");
   
   try {
-    // 1. Fetch active target metrics from the central morning cache
+    // 1. Fetch active target metrics from the true morning cache table
     const { data: brief } = await supabase
-      .from("environmental_cache")
-      .select("live_sst_value")
+      .from("ocean_data_cache")
+      .select("*")
       .order("created_at", { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
-    // 2. Establish high-contrast local stretch boundaries (e.g., 58°F shelf water up to Gulf Stream core)
-    const activeSst = brief?.live_sst_value || 72.0;
-    const minF = activeSst - 12.0; // Captures cold northern canyon walls
-    const maxF = activeSst + 2.0;  // Captures core hot water filament
+    // Safely fallback through your active baseline logging options
+    const activeSst = brief?.sst_data?.avgF || brief?.live_sst_value || 72.0;
+    
+    // 2. Establish high-contrast local stretch boundaries (14°F dynamic range window)
+    const minF = activeSst - 12.0; // Captures cold shelf water boundaries
+    const maxF = activeSst + 2.0;  // Captures core hot Gulf Stream pool
 
-    // Convert Fahrenheit thresholds to Celsius for NOAA's ERDDAP layout engine
+    // Convert Fahrenheit thresholds to Celsius for NOAA's ERDDAP rendering engine
     const minC = ((minF - 32) * 5) / 9;
     const maxC = ((maxF - 32) * 5) / 9;
 
@@ -66,7 +68,7 @@ export default async function handler(req: Request, context: Context): Promise<R
     noaaWmsUrl.searchParams.set("height", "256");
     noaaWmsUrl.searchParams.set("bbox", bbox);
     noaaWmsUrl.searchParams.set("colorscalerange", `${minC.toFixed(1)},${maxC.toFixed(1)}`);
-    noaaWmsUrl.searchParams.set("palette", "Jet"); // Classic tournament blue-to-red scale
+    noaaWmsUrl.searchParams.set("palette", "Jet"); // Traditional high-contrast blue-to-red map layer
 
     // 5. Fetch the raw image from the federal server
     const noaaResponse = await fetch(noaaWmsUrl.toString());
@@ -80,13 +82,13 @@ export default async function handler(req: Request, context: Context): Promise<R
     return new Response(imageBuffer, {
       headers: {
         "Content-Type": "image/png",
-        "Cache-Control": "public, max-age=1800" // Cache tiles for 30 minutes to make map panning blazing fast
+        "Cache-Control": "public, max-age=1800" // Cache map tiles for 30 minutes to make map panning instant
       }
     });
 
   } catch (err) {
     console.error(`[tile-proxy error mapping tile ${z}/${x}/${y}]:`, err);
-    // Return a transparent 1x1 placeholder png if a tile fails or hits deep cloud blockage
+    // Return a transparent 1x1 placeholder png if a tile fails or hits cloud blockage
     const transparentPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
     return new Response(transparentPng, { headers: { "Content-Type": "image/png" } });
   }
