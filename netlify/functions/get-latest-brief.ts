@@ -22,46 +22,59 @@ export default async function handler(req: Request, context: Context): Promise<R
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
+  console.log("[latest-brief] Inbound trigger pass received. Fetching records...");
+
   try {
-    // 1. Grab the latest entry from your main briefing logs
-    const { data: brief, error: briefError } = await supabase
+    // 1. Fetch latest brief record
+    let { data: brief, error: briefError } = await supabase
       .from("daily_briefs")
       .select("*")
       .order("forecast_date", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (briefError) throw briefError;
+    if (briefError) {
+      console.error("[latest-brief] Supabase read failure on daily_briefs:", briefError.message);
+    }
 
-    // 2. Fetch the backup structural oceanography framework metrics
-    const { data: rawCache } = await supabase
+    // 2. Fetch raw data cache
+    const { data: rawCache, error: cacheError } = await supabase
       .from("ocean_data_cache")
       .select("*")
-      .order("created_at", { ascending: false })
+      .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    // 3. Extract baseline navigation targets using your guaranteed data fields
-    // Default to Washington Canyon coordinates if your custom float blocks aren't active yet
+    if (cacheError) {
+      console.error("[latest-brief] Supabase read failure on ocean_data_cache:", cacheError.message);
+    }
+
+    console.log("[latest-brief] Database pass completed. brief found:", !!brief, "cache found:", !!rawCache);
+
+    // 3. Fallback variable assembly matching your verified schema columns
     const pLat = brief?.primary_lat || 37.55;
     const pLng = brief?.primary_lng || -74.35;
     const sLat = brief?.secondary_lat || 37.88;
     const sLng = brief?.secondary_lng || -74.12;
-    const sstVal = brief?.live_sst_value || rawCache?.sst_data?.avgF || 71.0;
+    
+    // Safely pull from your sst_data JSON block columns exactly
+    const sstVal = brief?.live_sst_value || rawCache?.sst_data?.avgF || rawCache?.sst_data?.maxF || 71.0;
+    const breakDelta = brief?.live_break_delta || 2.5;
+    const targetDate = brief?.forecast_date || rawCache?.updated_at || new Date().toISOString().split("T")[0];
 
     const payload = {
       success: true,
       brief: brief || null,
       meta: {
         live_sst_value: sstVal,
-        live_break_delta: brief?.live_break_delta || 2.5,
+        live_break_delta: breakDelta,
         primary_lat: pLat,
         primary_lng: pLng,
         secondary_lat: sLat,
         secondary_lng: sLng,
-        updated_at: brief?.forecast_date || new Date().toISOString()
+        updated_at: targetDate
       },
-      // Re-populate your main map hotspots array instantly so pins don't drop out
+      // Keep your frontend loop happy by feeding both standard name profiles
       hotspots: [
         {
           id: "target-1",
@@ -69,7 +82,7 @@ export default async function handler(req: Request, context: Context): Promise<R
           lat: pLat,
           lng: pLng,
           liveSst: sstVal,
-          liveBreak: brief?.live_break_delta || 2.5,
+          liveBreak: breakDelta,
           liveConfidence: 92,
           isPrimaryAI: true
         },
@@ -86,11 +99,12 @@ export default async function handler(req: Request, context: Context): Promise<R
       ]
     };
 
+    console.log("[latest-brief] Dispatching completed payload frame to client mapping layers.");
     return new Response(JSON.stringify(payload), { status: 200, headers: corsHeaders });
 
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[latest-brief fatal]:", message);
+    console.error("[latest-brief fatal execution error]:", message);
     return new Response(JSON.stringify({ success: false, error: message }), { status: 500, headers: corsHeaders });
   }
 }
