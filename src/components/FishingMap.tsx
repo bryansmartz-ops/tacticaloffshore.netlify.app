@@ -1,6 +1,3 @@
-// src/components/FishingMap.tsx
-// ─────────────────────────────────────────────────────────────────────
-
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import { toLoranTD, haversineNm, confidenceColor, speciesFromSST } from "../lib/hotspots";
@@ -94,17 +91,21 @@ export default function FishingMap({
 
   useEffect(() => { liveHotspotsRef.current = liveHotspots; }, [liveHotspots]);
 
-  // ── Processing Hook ──────────────────────────────────────────────────
+  // ── Processing Hook Hardened Against Database Row Targets ─────────────
   useEffect(() => {
-    const activeIds = hotspotDefs.map((h) => h.id);
+    // Extract definitions safely whether wrapped inside an object payload schema or an array frame
+    const targets = Array.isArray(hotspotDefs) ? hotspotDefs : (hotspotDefs as any)?.hotspots || [];
+    const activeIds = targets.map((h: any) => h.id);
+    
     loadingIds.current = new Set(activeIds);
     setLiveHotspots([]);
     liveHotspotsRef.current = [];
 
     const confirmed: HotspotDisplay[] = [];
 
-    hotspotDefs.forEach((h) => {
-      if (h.liveSst) {
+    targets.forEach((h: any) => {
+      const currentSst = h.liveSst || h.sstTemp || null;
+      if (currentSst) {
         loadingIds.current.delete(h.id);
         const distLabel = h.title?.split(" ")[0] || "Canyon";
         
@@ -112,13 +113,13 @@ export default function FishingMap({
           id: h.id,
           title: h.isPrimaryAI ? `Primary Target (${h.title})` : h.isSecondaryAI ? `Secondary Target (${h.title})` : h.title,
           distanceLabel: distLabel,
-          confidence: h.liveConfidence || 75,
-          sstTemp: h.liveSst,
-          breakDelta: h.liveBreak || 0,
+          confidence: h.liveConfidence || h.confidence || 75,
+          sstTemp: Number(currentSst),
+          breakDelta: h.liveBreak || h.breakDelta || 0,
           lat: h.lat,
           lng: h.lng,
-          species: speciesFromSST(h.liveSst),
-          signals: h.liveSignals || EMPTY_SIGNALS,
+          species: speciesFromSST(Number(currentSst)),
+          signals: h.liveSignals || h.signals || EMPTY_SIGNALS,
           isFallbackSst: false,
         };
 
@@ -156,8 +157,8 @@ export default function FishingMap({
     const bathyOverlay = L.tileLayer(BATHY_OVERLAY_TILE, { opacity: 0.9, pane: "bathyOverlayPane", maxNativeZoom: 10, maxZoom: 14 });
     bathyOverlayRef.current = bathyOverlay; bathyOverlay.addTo(map);
 
-    // CRITICAL FIX: Add the leading root slash to lock down the domain path alignment
-    const proxySstUrl = `//get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
+    // CRITICAL FIX: Targeted direct internal function directory path wrapper to break SPA loops
+    const proxySstUrl = `/.netlify/functions/get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
     const sstLayer = L.tileLayer(proxySstUrl, {
       opacity: mode === "full" ? 0.55 : 0.70,
       pane: "sstPane",
@@ -178,11 +179,11 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // Sync timeline historical changes directly using absolute paths
+  // Sync timeline historical changes directly using explicit absolute system endpoints
   useEffect(() => {
     const layer = sstLayerRef.current;
     if (layer) {
-      const proxySstUrl = `/get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
+      const proxySstUrl = `/.netlify/functions/get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
       layer.setUrl(proxySstUrl);
     }
   }, [sstOffset]);
