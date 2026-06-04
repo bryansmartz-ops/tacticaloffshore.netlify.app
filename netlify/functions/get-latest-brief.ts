@@ -1,13 +1,6 @@
 // netlify/functions/get-latest-brief.ts
-// Hardened Node.js Serverless Function — Fetch Latest Cached Briefing Data
+// Hardened Zero-Dependency Serverless Engine — Unified Data Cache & Buoy Fetch
 // ─────────────────────────────────────────────────────────────────────
-
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -16,52 +9,68 @@ const corsHeaders = {
   "Content-Type": "application/json"
 };
 
+const NDBC_BUOY_URL = "https://www.ndbc.noaa.gov/data/realtime2/44009.txt";
+
 export const handler = async (event: any) => {
-  // Handle pre-flight browser security checks
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: corsHeaders, body: "" };
   }
 
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  let liveBuoyData = { wind: null, wave: null, ts: "Offline" };
+
+  // ─── SECTION 1: DIRECT SERVER-SIDE BUOY FETCH (NO CORS PROXY NEEDED) ───
   try {
-    // 1. Fetch the absolute newest tactical brief log entry
-    let { data: brief } = await supabase
-      .from("daily_briefs")
-      .select("*")
-      .order("forecast_date", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const buoyRes = await fetch(NDBC_BUOY_URL);
+    if (buoyRes.ok) {
+      const text = await buoyRes.text();
+      const lines = text.split("\n").filter((l) => l.trim() && !l.startsWith("#"));
+      const parts = lines[0]?.trim().split(/\s+/) ?? [];
+      
+      const getMetric = (i: number): number | null => {
+        const v = parseFloat(parts[i]);
+        return isNaN(v) || v === 99 || v === 999 || v === 9999 ? null : v;
+      };
 
-    if (!brief) {
-      const { data: altBrief } = await supabase
-        .from("daily_briefs")
-        .select("*")
-        .order("id", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (altBrief) brief = altBrief;
+      const wspd = getMetric(6);
+      const wvht = getMetric(8);
+      
+      const month = parts[1]?.padStart(2, "0") ?? "--";
+      const day = parts[2]?.padStart(2, "0") ?? "--";
+      const hour = parts[3]?.padStart(2, "0") ?? "--";
+      const min = parts[4]?.padStart(2, "0") ?? "--";
+
+      liveBuoyData = {
+        wind: wspd !== null ? Math.round(wspd * 1.94384) : null,
+        wave: wvht !== null ? parseFloat((wvht * 3.28084).toFixed(1)) : null,
+        ts: `${month}/${day} ${hour}:${min}Z`
+      };
     }
+  } catch (buoyErr) {
+    console.warn("[Server Buoy Fetch Skipped]: Falling back to client computations");
+  }
 
-    // 2. Fetch the backup environmental satellite cache matrix
-    let rawCache = null;
-    const { data: cacheTry1 } = await supabase
-      .from("ocean_data_cache")
-      .select("*")
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    rawCache = cacheTry1;
+  // ─── SECTION 2: DATABASE DATA EXTRACTION ──────────────────────────────
+  try {
+    // 1. Fetch latest raw entry from tactical briefs
+    const briefUrl = `${supabaseUrl}/rest/v1/daily_briefs?select=*&order=forecast_date.desc&limit=1`;
+    const briefResponse = await fetch(briefUrl, {
+      headers: { "apikey": supabaseKey!, "Authorization": `Bearer ${supabaseKey}` }
+    });
+    const briefArray = briefResponse.ok ? await briefResponse.json() : [];
+    const brief = briefArray[0] || null;
 
-    if (!rawCache) {
-      const { data: cacheTry2 } = await supabase
-        .from("ocean_data_cache")
-        .select("*")
-        .order("id", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      rawCache = cacheTry2;
-    }
+    // 2. Fetch latest entry from environmental satellite matrices
+    const cacheUrl = `${supabaseUrl}/rest/v1/ocean_data_cache?select=*&order=updated_at.desc&limit=1`;
+    const cacheResponse = await fetch(cacheUrl, {
+      headers: { "apikey": supabaseKey!, "Authorization": `Bearer ${supabaseKey}` }
+    });
+    const cacheArray = cacheResponse.ok ? await cacheResponse.json() : [];
+    const rawCache = cacheArray[0] || null;
 
-    // 3. Bind properties tightly to your confirmed database object schema keys
+    // Safe fallback mapping arrays
     const pLat = brief?.primary_lat || 37.55;
     const pLng = brief?.primary_lng || -74.35;
     const sLat = brief?.secondary_lat || 37.88;
@@ -73,7 +82,8 @@ export const handler = async (event: any) => {
 
     const payload = {
       success: true,
-      brief: brief || null,
+      brief: brief,
+      buoyFallback: liveBuoyData,
       meta: {
         live_sst_value: sstVal,
         live_break_delta: breakDelta,
@@ -114,7 +124,6 @@ export const handler = async (event: any) => {
     };
 
   } catch (err: any) {
-    console.error("[latest-brief error]:", err.message);
     return {
       statusCode: 500,
       headers: corsHeaders,
