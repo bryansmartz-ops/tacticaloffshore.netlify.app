@@ -1,5 +1,5 @@
 # netlify.toml
-# Complete Defensive Path Matrix Alignment Configuration
+# Complete Forced Rewrite Matrix
 # ─────────────────────────────────────────────────────────────────────
 
 [build]
@@ -9,20 +9,6 @@
 [functions]
   directory = "netlify/functions"
 
-# ── Relative Fetch Injections (Fixes the current console crash) ───────
-[[redirects]]
-  from   = "get-latest-brief"
-  to     = "/.netlify/functions/get-latest-brief"
-  status = 200
-  force  = true
-
-[[redirects]]
-  from   = "get-sst-tile"
-  to     = "/.netlify/functions/get-sst-tile"
-  status = 200
-  force  = true
-
-# ── Absolute Fetch Safeguards ─────────────────────────────────────────
 [[redirects]]
   from   = "/get-latest-brief"
   to     = "/.netlify/functions/get-latest-brief"
@@ -35,15 +21,15 @@
   status = 200
   force  = true
 
-# ── Explicit Function Direct Pass-through ─────────────────────────────
 [[redirects]]
   from   = "/.netlify/*"
   to     = "/.netlify/:splat"
   status = 200
   force  = true
 
-# ── SPA Fallback Catch-all ────────────────────────────────────────────
+# Explicitly set force = false so it NEVER intercepts real background server functions
 [[redirects]]
   from   = "/*"
   to     = "/index.html"
   status = 200
+  force  = false
