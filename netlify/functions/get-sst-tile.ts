@@ -30,32 +30,55 @@ export default async function handler(req: Request, context: Context): Promise<R
   const z = parseInt(url.searchParams.get("z") || "0");
   
   try {
-    // 1. Fetch latest baseline telemetry array records safely
-    const { data: brief } = await supabase
+    // 1. Grab latest briefing logs safely
+    let { data: brief } = await supabase
       .from("daily_briefs")
       .select("*")
       .order("forecast_date", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    const { data: rawCache } = await supabase
+    if (!brief) {
+      const { data: altBrief } = await supabase
+        .from("daily_briefs")
+        .select("*")
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (altBrief) brief = altBrief;
+    }
+
+    // 2. Grab raw cache with safe column fallback checks
+    let rawCache = null;
+    const { data: cacheTry1 } = await supabase
       .from("ocean_data_cache")
       .select("*")
-      .order("created_at", { ascending: false })
+      .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    rawCache = cacheTry1;
 
-    // 2. Normalize water temperature calculations
+    if (!rawCache) {
+      const { data: cacheTry2 } = await supabase
+        .from("ocean_data_cache")
+        .select("*")
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      rawCache = cacheTry2;
+    }
+
+    // 3. Normalize water temperature calculations
     const activeSst = brief?.live_sst_value || rawCache?.sst_data?.avgF || 71.0;
-    const minF = activeSst - 13.0; // Dynamic floor window
-    const maxF = activeSst + 2.0;  // Dynamic ceiling window
+    const minF = activeSst - 13.0; 
+    const maxF = activeSst + 2.0;  
 
     const minC = ((minF - 32) * 5) / 9;
     const maxC = ((maxF - 32) * 5) / 9;
 
     const bbox = tileToBBox(x, y, z);
 
-    // 3. Target the official NOAA CoastWatch East Coast data stream directly
+    // 4. Query NOAA CoastWatch WMS
     const noaaWmsUrl = new URL("https://coastwatch.noaa.gov/erddap/wms/noaacwVHNsstLines3Day/request");
     noaaWmsUrl.searchParams.set("service", "WMS");
     noaaWmsUrl.searchParams.set("version", "1.3.0");
