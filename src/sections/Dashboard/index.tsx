@@ -189,7 +189,7 @@ export default function Dashboard() {
         ) : brief ? (
           <div className="space-y-3">
             <p className="text-sm text-slate-300 leading-relaxed font-medium">
-              {brief.environmental_summary || "Tactical offshore data active. Direct coordinates mapped to mapping component layers successfully."}
+              {brief?.environmental_summary || "Tactical offshore data active. Direct coordinates mapped to mapping component layers successfully."}
             </p>
             <div className="grid grid-cols-2 gap-2 pt-1">
               <div className="bg-slate-900/40 p-2 rounded-lg border border-slate-800">
@@ -197,7 +197,7 @@ export default function Dashboard() {
                   Primary Strike Zone
                 </span>
                 <span className="text-xs text-amber-400 font-semibold font-mono truncate block mt-0.5">
-                  {brief.primary_target_zone?.split("\n")[0] || "Washington Canyon"}
+                  {brief?.primary_target_zone?.split("\n")[0] || "Washington Canyon"}
                 </span>
               </div>
               <div className="bg-slate-900/40 p-2 rounded-lg border border-slate-800">
