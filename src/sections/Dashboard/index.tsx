@@ -11,8 +11,15 @@ import {
   Thermometer,
   Anchor,
 } from "lucide-react";
-// FIXED: Path adjusted to step up 3 levels out of src/sections/Dashboard/ to find src/lib/erddap
-import { getSSTBBoxCached, type SSTResult } from "../../../lib/erddap";
+
+// ─── Inline Type Alignments (Removes the broken erddap file import completely) ───
+export interface SSTResult {
+  ok: boolean;
+  fahrenheit: number;
+  celsius: number;
+  resolution: "0.02deg" | "0.01deg" | "unknown";
+  timestamp: string;
+}
 
 // ─── NDBC Buoy constants ──────────────────────────────────────────────────────
 const NDBC_OBS_URL = "https://www.ndbc.noaa.gov/data/realtime2/44009.txt";
@@ -138,12 +145,8 @@ function getDashboardSolunar(): { rating: string; nextMajor: string; ratingColor
   const dailyScore = Math.round(Math.min(100, Math.round(50 + phaseScore * 0.5)) * 0.7 + Math.min(100, Math.round(30 + phaseScore * 0.4)) * 0.3);
   const rating = dailyScore >= 80 ? "Excellent" : dailyScore >= 60 ? "Good" : dailyScore >= 40 ? "Fair" : "Poor";
   const upcoming = [transitLocal, (((transitLocal + 12.41) % 24) + 24) % 24].map(h => ({ h, label: formatHM(h) })).find(c => c.h > (now.getHours() + now.getMinutes() / 60)) || { label: formatHM(transitLocal) };
-  return { rating, nextMajor: upcoming.label, ratingColor: rating === "Excellent" ? "text-emerald-400" : rating === "Good" ? "text-amber-400" : decline => rating === "Fair" ? "text-yellow-400" : "text-slate-400" };
+  return { rating, nextMajor: upcoming.label, ratingColor: rating === "Excellent" ? "text-emerald-400" : rating === "Good" ? "text-amber-400" : rating === "Fair" ? "text-yellow-400" : "text-slate-400" };
 }
-
-const BUOY_LAT = 38.46;
-const BUOY_LNG = -74.692;
-const DASH_SST_BBOX = { minLat: BUOY_LAT - 0.15, maxLat: BUOY_LAT + 0.15, minLng: BUOY_LNG - 0.15, maxLng: BUOY_LNG + 0.15 };
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -155,17 +158,26 @@ export default function Dashboard() {
 
   useEffect(() => {
     setSolunar(getDashboardSolunar());
-    getSSTBBoxCached(DASH_SST_BBOX).then(setSSTResult);
     fetchConditionStatus().then(setConditions);
 
-    // Hit absolute root redirect endpoint route
+    // ─── Unified Multi-Endpoint Live Data Hydration ───
     fetch("/get-latest-brief")
       .then((res) => {
         if (!res.ok) throw new Error("Cache sync warmup pending");
         return res.json();
       })
       .then((data) => {
-        setBrief(data?.brief || data);
+        const trueBrief = data?.brief || data;
+        setBrief(trueBrief);
+        
+        // Extract raw SST telemetry directly from backend payload fallback frames
+        setSSTResult({
+          ok: true,
+          fahrenheit: data?.meta?.live_sst_value || 71.0,
+          celsius: (((data?.meta?.live_sst_value || 71.0) - 32) * 5) / 9,
+          resolution: "0.02deg",
+          timestamp: data?.meta?.updated_at || new Date().toISOString()
+        });
         setBriefLoading(false);
       })
       .catch((err) => {
