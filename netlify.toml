@@ -1,5 +1,5 @@
 # netlify.toml
-# Complete Forced Rewrite Matrix
+# Production Forced API Redirection Matrix Configuration
 # ─────────────────────────────────────────────────────────────────────
 
 [build]
@@ -27,7 +27,7 @@
   status = 200
   force  = true
 
-# Explicitly set force = false so it NEVER intercepts real background server functions
+# Standalone App Router Routing Anchor Engine
 [[redirects]]
   from   = "/*"
   to     = "/index.html"
