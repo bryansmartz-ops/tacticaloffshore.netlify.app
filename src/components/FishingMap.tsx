@@ -36,6 +36,36 @@ const BATHY_BASE_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Oc
 const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
 const EMPTY_SIGNALS = { sstScore: 0, sstBreakScore: 0, chloroScore: 0, altimetryScore: 0, historyReportsScore: 0 };
 
+function rankBadge(id: string, hotspots: HotspotDisplay[]): string {
+  const sorted = [...hotspots].sort((a, b) => b.confidence - a.confidence);
+  const rank = sorted.findIndex((h) => h.id === id);
+  if (rank === 0) return `<span style="background:#f59e0b;color:#fff;font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;letter-spacing:0.05em;vertical-align:middle">PRIMARY</span>`;
+  if (rank === 1) return `<span style="background:#06b6d4;color:#fff;font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;letter-spacing:0.05em;vertical-align:middle">SECONDARY</span>`;
+  return "";
+}
+
+function buildHotspotPopupHtml(h: HotspotDisplay, allHotspots: HotspotDisplay[]): string {
+  const color = confidenceColor(h.confidence);
+  const td = toLoranTD(h.lat, h.lng);
+  const badge = rankBadge(h.id, allHotspots);
+  const breakVal = h.breakDelta > 0 ? `🔥 +${h.breakDelta}°F break` : `<span style="color:#94a3b8">no break detected</span>`;
+  const speciesTags = h.species.map((s) => `<span style="background:rgba(6,182,212,0.2);color:#67e8f9;border-radius:999px;padding:1px 7px;font-size:10px;margin-right:3px">${s}</span>`).join("");
+  
+  return `<div style="color:#cbd5e1;font-size:12px;min-width:210px">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;flex-wrap:wrap">
+      <span style="color:${color};font-weight:700;font-size:13px">${h.title}</span>
+      ${badge}
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <span style="color:${color};font-size:18px;font-weight:800;line-height:1">${h.confidence}%</span>
+      <span style="color:#94a3b8;font-size:10px">confidence (High-Fidelity)</span>
+    </div>
+    <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${h.sstTemp.toFixed(1)}°F</strong> &nbsp;&nbsp;${breakVal}</div>
+    <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
+    <div style="margin-bottom:4px">${speciesTags}</div>
+  </div>`;
+}
+
 export default function FishingMap({
   mode,
   hotspotDefs,
@@ -126,8 +156,8 @@ export default function FishingMap({
     const bathyOverlay = L.tileLayer(BATHY_OVERLAY_TILE, { opacity: 0.9, pane: "bathyOverlayPane", maxNativeZoom: 10, maxZoom: 14 });
     bathyOverlayRef.current = bathyOverlay; bathyOverlay.addTo(map);
 
-    // Route image requests directly through your new server tile proxy
-    const proxySstUrl = `/.netlify/functions/get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
+    // CRITICAL FIX: Add the leading root slash to lock down the domain path alignment
+    const proxySstUrl = `//get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
     const sstLayer = L.tileLayer(proxySstUrl, {
       opacity: mode === "full" ? 0.55 : 0.70,
       pane: "sstPane",
@@ -148,11 +178,11 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // Hot-swap proxy paths when historical timeline adjustments occur
+  // Sync timeline historical changes directly using absolute paths
   useEffect(() => {
     const layer = sstLayerRef.current;
     if (layer) {
-      const proxySstUrl = `/.netlify/functions/get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
+      const proxySstUrl = `/get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
       layer.setUrl(proxySstUrl);
     }
   }, [sstOffset]);
@@ -177,7 +207,7 @@ export default function FishingMap({
       }
 
       const circle = L.circleMarker([h.lat, h.lng], { pane: "hotspotPane", radius: 13, color, fillColor: color, fillOpacity: 0.35, weight: 2, interactive: true });
-      circle.bindPopup(h.title, { className: "fishing-map-popup" });
+      circle.bindPopup(buildHotspotPopupHtml(h, spots), { className: "fishing-map-popup" });
       circle.addTo(map);
       circleMarkersRef.current.set(h.id, circle);
 
@@ -188,7 +218,7 @@ export default function FishingMap({
         icon: L.divIcon({ className: "", html: `<div style="display:flex;align-items:center;gap:4px;white-space:nowrap"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${color}"></span><span style="color:#e2e8f0;font-size:11px;font-weight:600;text-shadow:0 0 4px #000">${leading} • ${h.sstTemp.toFixed(0)}°F</span></div>`, iconAnchor: [100, -12] })
       });
       labelMarker.addTo(map);
-      labelMarkersRef.current.set(labelMarker);
+      labelMarkersRef.current.set(h.id, labelMarker);
     });
   }
 
