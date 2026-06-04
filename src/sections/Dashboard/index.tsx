@@ -12,7 +12,7 @@ import {
   Anchor,
 } from "lucide-react";
 
-// ─── Inline Type Alignments (Removes the broken erddap file import completely) ───
+// ─── Inline Type Alignments (Removes external erddap file imports completely) ───
 export interface SSTResult {
   ok: boolean;
   fahrenheit: number;
@@ -160,25 +160,30 @@ export default function Dashboard() {
     setSolunar(getDashboardSolunar());
     fetchConditionStatus().then(setConditions);
 
-    // ─── Unified Multi-Endpoint Live Data Hydration ───
+    // ─── Asynchronous Multi-Endpoint Hydration Sequence ───
     fetch("/get-latest-brief")
       .then((res) => {
-        if (!res.ok) throw new Error("Cache sync warmup pending");
+        if (!res.ok) throw new Error("Cache server synchronization pending");
         return res.json();
       })
       .then((data) => {
         const trueBrief = data?.brief || data;
         setBrief(trueBrief);
-        
-        // Extract raw SST telemetry directly from backend payload fallback frames
-        setSSTResult({
-          ok: true,
-          fahrenheit: data?.meta?.live_sst_value || 71.0,
-          celsius: (((data?.meta?.live_sst_value || 71.0) - 32) * 5) / 9,
-          resolution: "0.02deg",
-          timestamp: data?.meta?.updated_at || new Date().toISOString()
-        });
-        setBriefLoading(false);
+
+        // Frame shift update layout to resolve state rendering timing gaps
+        setTimeout(() => {
+          const activeSst = data?.meta?.live_sst_value || trueBrief?.live_sst_value || 71.0;
+          const activeDate = data?.meta?.updated_at || trueBrief?.forecast_date || new Date().toISOString().split("T")[0];
+
+          setSSTResult({
+            ok: true,
+            fahrenheit: Number(activeSst),
+            celsius: ((Number(activeSst) - 32) * 5) / 9,
+            resolution: "0.02deg",
+            timestamp: activeDate
+          });
+          setBriefLoading(false);
+        }, 10);
       })
       .catch((err) => {
         console.warn("[dashboard] Local endpoint standby:", err);
@@ -188,6 +193,7 @@ export default function Dashboard() {
 
   return (
     <div className="p-4 space-y-6">
+      {/* ─── Tactical AI Briefing Header Section ─── */}
       <section className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl p-4 border border-slate-700/60 shadow-lg">
         <div className="flex items-center gap-2 mb-2 text-cyan-400 font-bold tracking-wide text-xs uppercase">
           <Anchor className="w-4 h-4 animate-pulse" />
@@ -231,6 +237,7 @@ export default function Dashboard() {
         )}
       </section>
 
+      {/* ─── Quick Access Links ─── */}
       <section>
         <h2 className="text-xl font-bold text-white mb-4">Quick Access</h2>
         <div className="grid grid-cols-2 gap-3">
@@ -253,6 +260,7 @@ export default function Dashboard() {
         </div>
       </section>
 
+      {/* ─── Today's Numerical Outlooks ─── */}
       <section className="bg-slate-800 rounded-xl p-4 border border-slate-700">
         <h3 className="font-semibold text-white mb-3">Today&#39;s Outlook</h3>
         <div className="grid grid-cols-2 gap-2 text-center">
