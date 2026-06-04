@@ -103,7 +103,7 @@ export default function Dashboard() {
     setSolunar(getDashboardSolunar());
 
     // Hit the hardened backend endpoint
-    fetch("/get-latest-brief")
+    fetch("/.netlify/functions/get-latest-brief")
       .then((res) => {
         if (!res.ok) throw new Error("Synchronization offline");
         return res.json();
