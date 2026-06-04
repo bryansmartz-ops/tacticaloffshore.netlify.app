@@ -25,64 +25,42 @@ function tileToBBox(x: number, y: number, z: number): string {
 
 export default async function handler(req: Request, context: Context): Promise<Response> {
   const url = new URL(req.url);
-  const x = parseInt(url.searchParams.get("x") || "0");
-  const y = parseInt(url.searchParams.get("y") || "0");
-  const z = parseInt(url.searchParams.get("z") || "0");
-  
+  const x = url.searchParams.get("x") || "0";
+  const y = url.searchParams.get("y") || "0";
+  const z = url.searchParams.get("z") || "0";
+
   try {
-    // 1. Grab latest briefing logs safely
-    let { data: brief } = await supabase
-      .from("daily_briefs")
-      .select("*")
-      .order("forecast_date", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!brief) {
-      const { data: altBrief } = await supabase
-        .from("daily_briefs")
-        .select("*")
-        .order("id", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (altBrief) brief = altBrief;
-    }
-
-    // 2. Grab raw cache with safe column fallback checks
-    let rawCache = null;
-    const { data: cacheTry1 } = await supabase
+    // 1. Gather environmental telemetry baseline from the raw data cache table rows
+    const { data: rawCache, error: cacheError } = await supabase
       .from("ocean_data_cache")
       .select("*")
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    rawCache = cacheTry1;
 
-    if (!rawCache) {
-      const { data: cacheTry2 } = await supabase
-        .from("ocean_data_cache")
-        .select("*")
-        .order("id", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      rawCache = cacheTry2;
+    if (cacheError) {
+      console.error("[tile-proxy] Supabase read error inside proxy worker:", cacheError.message);
     }
 
-    // 3. Normalize water temperature calculations
-    const activeSst = brief?.live_sst_value || rawCache?.sst_data?.avgF || 71.0;
-    const minF = activeSst - 13.0; 
+    // 2. Safely capture the average temperature value out of your validated JSON schema block columns
+    const activeSst = rawCache?.sst_data?.avgF || rawCache?.sst_data?.maxF || 71.0;
+    
+    // Set an explicit, safe thermal clipping range (14°F spectrum spread window)
+    const minF = activeSst - 12.0; 
     const maxF = activeSst + 2.0;  
 
     const minC = ((minF - 32) * 5) / 9;
     const maxC = ((maxF - 32) * 5) / 9;
 
-    const bbox = tileToBBox(x, y, z);
+    const bbox = tileToBBox(parseInt(x), parseInt(y), parseInt(z));
 
-    // 4. Query NOAA CoastWatch WMS
+    // 3. Build the official NOAA CoastWatch East Coast WMS direct data stream array request
     const noaaWmsUrl = new URL("https://coastwatch.noaa.gov/erddap/wms/noaacwVHNsstLines3Day/request");
     noaaWmsUrl.searchParams.set("service", "WMS");
     noaaWmsUrl.searchParams.set("version", "1.3.0");
     noaaWmsUrl.searchParams.set("request", "GetMap");
+    
+    // Crucial Update: Target the precise layer identification name for the 3-day high-resolution vector lines
     noaaWmsUrl.searchParams.set("layers", "noaacwVHNsstLines3Day:sst");
     noaaWmsUrl.searchParams.set("styles", "raster");
     noaaWmsUrl.searchParams.set("format", "image/png");
@@ -94,10 +72,13 @@ export default async function handler(req: Request, context: Context): Promise<R
     noaaWmsUrl.searchParams.set("colorscalerange", `${minC.toFixed(1)},${maxC.toFixed(1)}`);
     noaaWmsUrl.searchParams.set("palette", "Jet");
 
+    console.log(`[tile-proxy] Requesting tile ${z}/${x}/${y} from NOAA with dynamic range: ${minF.toFixed(1)}°F - ${maxF.toFixed(1)}°F`);
+
     const noaaResponse = await fetch(noaaWmsUrl.toString());
     
     if (!noaaResponse.ok) {
-      throw new Error(`NOAA upstream rejection state: ${noaaResponse.status}`);
+      console.error(`[tile-proxy] NOAA upstream server rejected request for tile ${z}/${x}/${y} with status: ${noaaResponse.status}`);
+      throw new Error(`NOAA failure state: ${noaaResponse.status}`);
     }
 
     const imageBuffer = await noaaResponse.arrayBuffer();
@@ -110,7 +91,7 @@ export default async function handler(req: Request, context: Context): Promise<R
     });
 
   } catch (err) {
-    console.error(`[tile-proxy failure] Returning placeholder for tile ${z}/${x}/${y}:`, err);
+    // If anything fails or crashes, flush the fallback transparent tile so the UI stays stable
     const transparentPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=", "base64");
     return new Response(transparentPng, { headers: { "Content-Type": "image/png" } });
   }
