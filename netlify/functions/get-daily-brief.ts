@@ -1,4 +1,4 @@
-// get-daily-brief.ts
+// netlify/functions/get-daily-brief.ts
 // Netlify v2 Serverless Function — Daily Offshore Fishing Stand-up Brief
 // ─────────────────────────────────────────────────────────────────────
 
@@ -31,7 +31,6 @@ interface LlmFields {
   sonar_strategy: string;
   primary_target_zone: string;    
   secondary_target_zone: string;
-  // Raw mathematical fields added to drive your PWA scoring algorithms safely
   primary_lat: number;
   primary_lng: number;
   secondary_lat: number;
@@ -187,7 +186,6 @@ Return a JSON object with EXACTLY these keys (all fields mandatory):
   }
 
   try {
-    // Parse response, forcing numeric values to be absolute floats or integers
     const parsed = JSON.parse(raw);
     parsed.primary_lat = parseFloat(parsed.primary_lat) || 37.55;
     parsed.primary_lng = parseFloat(parsed.primary_lng) || -74.35;
@@ -209,7 +207,6 @@ async function writeToSupabase(record: DailyBriefRecord): Promise<{ id: string }
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // NOTE: Ensure your 'daily_briefs' table contains your new float numeric columns: primary_lat, primary_lng, secondary_lat, secondary_lng, live_sst_value, live_break_delta
   const { data, error } = await supabase
     .from("daily_briefs")
     .upsert(record, { onConflict: "forecast_date" })
@@ -301,9 +298,20 @@ async function sendEmail(record: DailyBriefRecord): Promise<{ id?: string }> {
 // ─── Netlify v2 Handler ───────────────────────────────────────────────────────
 
 export default async function handler(req: Request, context: Context): Promise<Response> {
+  const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+  const forecastDate = new Date().toISOString().split("T")[0];
+
   try {
-    const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-    const forecastDate = new Date().toISOString().split("T")[0];
+    // 1. MUTEX LOCK CHECK: Kill race-condition double fires immediately
+    const { data: lock, error: lockError } = await supabase
+      .from("dispatch_logs")
+      .insert([{ dispatch_date: forecastDate, status: "PROCESSING" }]);
+
+    if (lockError && lockError.code === "23505") {
+      console.log(`[brief-lock] Blocked duplicate engine execution loop for ${forecastDate}. Firing aborted.`);
+      return Response.json({ success: true, message: "Duplicate execution neutralized by database lock state." });
+    }
+
     console.log(`[brief] Assembling daily brief from cache row for ${forecastDate}`);
 
     const { data: cacheArray, error: cacheError } = await supabase
@@ -338,7 +346,7 @@ export default async function handler(req: Request, context: Context): Promise<R
         sstText += `\nCRITICAL METADATA: Current satellite orbital pass is cloud-blinded. This temperature data represents the Last Known Good cloud-free window captured at local timestamp: ${cache.updated_at}.`;
       }
     } else {
-      sstText = "No successful satellite passes recorded in cache. Operating on standard early-June historical averages (66-71°F).";
+      stText = "No successful satellite passes recorded in cache. Operating on standard early-June historical averages (66-71°F).";
     }
 
     let altimetryText = "Altimetry stream reporting standby mode. Rely on bottom structure gradients.";
@@ -379,6 +387,12 @@ export default async function handler(req: Request, context: Context): Promise<R
     const savedRecord = await writeToSupabase(record);
     const emailResult = await sendEmail(record);
 
+    // 2. SUCCESS CONFIRMATION: Flip state to success so subsequent hooks lock out cleanly
+    await supabase
+      .from("dispatch_logs")
+      .update({ status: "SUCCESS" })
+      .eq("dispatch_date", forecastDate);
+
     return Response.json({
       success: true,
       record_id: savedRecord.id,
@@ -388,6 +402,10 @@ export default async function handler(req: Request, context: Context): Promise<R
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[brief] BRIEF GENERATOR FATAL ERROR:", message);
+
+    // 3. EXCEPTION RESET: Clear the daily constraint lock on real runtime errors so you can retry
+    await supabase.from("dispatch_logs").delete().eq("dispatch_date", forecastDate);
+
     return Response.json({ success: false, error: message }, { status: 500 });
   }
 }
