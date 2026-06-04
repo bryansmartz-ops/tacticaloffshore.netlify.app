@@ -10,9 +10,9 @@ import {
   ChevronRight,
   Thermometer,
   Anchor,
+  AlertTriangle,
 } from "lucide-react";
 
-// ─── Inline Type Alignments (Removes external erddap file imports completely) ───
 export interface SSTResult {
   ok: boolean;
   fahrenheit: number;
@@ -21,75 +21,16 @@ export interface SSTResult {
   timestamp: string;
 }
 
-// ─── NDBC Buoy constants ──────────────────────────────────────────────────────
-const NDBC_OBS_URL = "https://www.ndbc.noaa.gov/data/realtime2/44009.txt";
-const WIND_GO = 20; // knots
-const WIND_MARG = 30;
-const WAVE_GO = 6; // feet
-const WAVE_MARG = 9;
-
-function mpsToKt(mps: number): number {
-  return Math.round(mps * 1.94384);
-}
-function mToFt(m: number): number {
-  return parseFloat((m * 3.28084).toFixed(1));
-}
-
 type ConditionStatus = "GO" | "MARGINAL" | "NO-GO" | "loading" | "error";
-
-async function fetchConditionStatus(): Promise<{
-  status: ConditionStatus;
-  wind: number | null;
-  wave: number | null;
-  ts: string;
-}> {
-  try {
-    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(NDBC_OBS_URL)}`;
-    const res = await fetch(proxyUrl);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const text = await res.text();
-    const lines = text
-      .split("\n")
-      .filter((l) => l.trim() && !l.startsWith("#"));
-    const parts = lines[0]?.trim().split(/\s+/) ?? [];
-    const get = (i: number): number | null => {
-      const v = parseFloat(parts[i]);
-      return isNaN(v) || v === 99 || v === 999 || v === 9999 ? null : v;
-    };
-    const windKt = get(6) !== null ? mpsToKt(get(6)!) : null;
-    const waveFt = get(8) !== null ? mToFt(get(8)!) : null;
-    const month = parts[1]?.padStart(2, "0") ?? "--";
-    const day = parts[2]?.padStart(2, "0") ?? "--";
-    const hour = parts[3]?.padStart(2, "0") ?? "--";
-    const min = parts[4]?.padStart(2, "0") ?? "--";
-    const ts = `${month}/${day} ${hour}:${min}Z`;
-    const wind = windKt ?? 0;
-    const wave = waveFt ?? 0;
-    let status: ConditionStatus = "GO";
-    if (wind >= WIND_MARG || wave >= WAVE_MARG) status = "NO-GO";
-    else if (wind >= WIND_GO || wave >= WAVE_GO) status = "MARGINAL";
-    return { status, wind: windKt, wave: waveFt, ts };
-  } catch {
-    return { status: "error", wind: null, wave: null, ts: "" };
-  }
-}
-
-const quickLinks = [
-  { to: "/map", icon: Map, label: "Tactical Map", desc: "SST, hotspots, LORAN", color: "from-cyan-500 to-blue-600" },
-  { to: "/hotspots", icon: Target, label: "Hotspots", desc: "AI-predicted fishing zones", color: "from-orange-500 to-red-600" },
-  { to: "/catches", icon: Fish, label: "Catch Log", desc: "Log and track catches", color: "from-emerald-500 to-teal-600" },
-  { to: "/solunar", icon: Sun, label: "Solunar", desc: "Peak feeding times", color: "from-amber-500 to-orange-600" },
-  { to: "/tides", icon: Waves, label: "Tides", desc: "Tide schedule", color: "from-blue-500 to-indigo-600" },
-  { to: "/weather", icon: Cloud, label: "Weather", desc: "Marine forecast", color: "from-slate-500 to-slate-700" },
-];
 
 const LAT = 38.3365;
 const LNG = -75.0849;
 
+// ─── Chronological Solunar Calculators ─────────────────────────────────────────
 function jd(date: Date): number {
   const Y = date.getUTCFullYear();
   const M = date.getUTCMonth() + 1;
-  const D = date.getUTCDate();
+  const D = date.getTargetDate ? date.getTargetDate() : date.getDate();
   const A = Math.floor((14 - M) / 12);
   const y = Y + 4800 - A;
   const m = M + 12 * A - 3;
@@ -112,8 +53,7 @@ function moonLongitude(j: number): number {
   const Mm = 134.9633964 + 477198.8675055 * T;
   const F = 93.272095 + 483202.0175233 * T;
   const D = 297.8501921 + 445267.1114034 * T;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const lon = L0 + 6.288774 * Math.sin(toRad(Mm)) + 1.274027 * Math.sin(toRad(2 * D - Mm)) + 0.658314 * Math.sin(toRad(2 * D)) + 0.213618 * Math.sin(toRad(2 * Mm)) - 0.185116 * Math.sin(toRad(M)) - 0.114332 * Math.sin(toRad(2 * F));
+  const lon = L0 + 6.288774 * Math.sin((Mm * Math.PI) / 180) + 1.274027 * Math.sin(((2 * D - Mm) * Math.PI) / 180) + 0.658314 * Math.sin(((2 * D) * Math.PI) / 180);
   return ((lon % 360) + 360) % 360;
 }
 
@@ -155,55 +95,112 @@ export default function Dashboard() {
   const [conditions, setConditions] = useState<{ status: ConditionStatus; wind: number | null; wave: number | null; ts: string }>({ status: "loading", wind: null, wave: null, ts: "" });
   const [brief, setBrief] = useState<any>(null);
   const [briefLoading, setBriefLoading] = useState<boolean>(true);
+  
+  // Age Tracking Metrics
+  const [dataAgeHours, setDataAgeHours] = useState<number>(0);
 
   useEffect(() => {
     setSolunar(getDashboardSolunar());
-    fetchConditionStatus().then(setConditions);
 
-    // ─── Asynchronous Multi-Endpoint Hydration Sequence ───
+    // Hit the hardened backend endpoint
     fetch("/get-latest-brief")
       .then((res) => {
-        if (!res.ok) throw new Error("Cache server synchronization pending");
+        if (!res.ok) throw new Error("Synchronization offline");
         return res.json();
       })
       .then((data) => {
         const trueBrief = data?.brief || data;
         setBrief(trueBrief);
 
-        // Frame shift update layout to resolve state rendering timing gaps
+        // Safe extraction of buoy variables natively processed by server function
+        if (data?.buoyFallback && data.buoyFallback.ts !== "Offline") {
+          const b = data.buoyFallback;
+          let status: ConditionStatus = "GO";
+          if ((b.wind ?? 0) >= 30 || (b.wave ?? 0) >= 9) status = "NO-GO";
+          else if ((b.wind ?? 0) >= 20 || (b.wave ?? 0) >= 6) status = "MARGINAL";
+          setConditions({ status, wind: b.wind, wave: b.wave, ts: b.ts });
+        } else {
+          setConditions({ status: "error", wind: null, wave: null, ts: "Buoy Unreachable" });
+        }
+
+        // Calculate explicit age boundary constraints
+        const updateTime = data?.meta?.updated_at || trueBrief?.forecast_date || new Date().toISOString();
+        const hoursOld = (new Date().getTime() - new Date(updateTime).getTime()) / (1000 * 60 * 60);
+        setDataAgeHours(hoursOld);
+
         setTimeout(() => {
           const activeSst = data?.meta?.live_sst_value || trueBrief?.live_sst_value || 71.0;
-          const activeDate = data?.meta?.updated_at || trueBrief?.forecast_date || new Date().toISOString().split("T")[0];
-
           setSSTResult({
             ok: true,
             fahrenheit: Number(activeSst),
             celsius: ((Number(activeSst) - 32) * 5) / 9,
             resolution: "0.02deg",
-            timestamp: activeDate
+            timestamp: updateTime
           });
           setBriefLoading(false);
         }, 10);
       })
       .catch((err) => {
-        console.warn("[dashboard] Local endpoint standby:", err);
+        console.warn("[Dashboard Runtime Stalled]:", err);
         setBriefLoading(false);
+        setConditions({ status: "error", wind: null, wave: null, ts: "Proxy Blocked" });
       });
   }, []);
 
+  const quickLinks = [
+    { to: "/map", icon: Map, label: "Tactical Map", desc: "SST, hotspots, LORAN", color: "from-cyan-500 to-blue-600" },
+    { to: "/hotspots", icon: Target, label: "Hotspots", desc: "AI-predicted fishing zones", color: "from-orange-500 to-red-600" },
+    { to: "/catches", icon: Fish, label: "Catch Log", desc: "Log and track catches", color: "from-emerald-500 to-teal-600" },
+    { to: "/solunar", icon: Sun, label: "Solunar", desc: "Peak feeding times", color: "from-amber-500 to-orange-600" },
+    { to: "/tides", icon: Waves, label: "Tides", desc: "Tide schedule", color: "from-blue-500 to-indigo-600" },
+    { to: "/weather", icon: Cloud, label: "Weather", desc: "Marine forecast", color: "from-slate-500 to-slate-700" },
+  ];
+
   return (
     <div className="p-4 space-y-6">
+      {/* ─── DATA AGE TIMELINE BANNER GUARD ─── */}
+      {!briefLoading && dataAgeHours > 12 && (
+        <div className={`flex items-center gap-3 p-3 rounded-xl border font-medium text-xs ${
+          dataAgeHours > 24 
+            ? "bg-red-950/40 text-red-400 border-red-900/60" 
+            : "bg-orange-950/40 text-orange-400 border-orange-900/60"
+        }`}>
+          <AlertTriangle className="w-5 h-5 flex-shrink-0 animate-bounce" />
+          <div>
+            <span className="font-bold block uppercase tracking-wide">
+              {dataAgeHours > 24 ? "CRITICAL: Satellite Telemetry Expired" : "WARNING: Stale Tactical Intel"}
+            </span>
+            <span>
+              Canyon charts were compiled {Math.round(dataAgeHours)} hours ago. Thermal boundaries may have shifted from plotted markers.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ─── Tactical AI Briefing Header Section ─── */}
       <section className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl p-4 border border-slate-700/60 shadow-lg">
-        <div className="flex items-center gap-2 mb-2 text-cyan-400 font-bold tracking-wide text-xs uppercase">
-          <Anchor className="w-4 h-4 animate-pulse" />
-          Tactical Briefing Core
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2 text-cyan-400 font-bold tracking-wide text-xs uppercase">
+            <Anchor className="w-4 h-4" />
+            Tactical Briefing Core
+          </div>
+          {!briefLoading && (
+            <span className={`text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider ${
+              dataAgeHours > 24 ? "bg-red-900/40 text-red-400" : dataAgeHours > 12 ? "bg-orange-900/40 text-orange-400" : "bg-emerald-900/40 text-emerald-400"
+            }`}>
+              {dataAgeHours > 24 ? "EXPIRED" : dataAgeHours > 12 ? "STALE" : "LIVE CACHE"}
+            </span>
+          )}
         </div>
 
         {briefLoading ? (
           <div className="text-sm text-slate-500 animate-pulse py-2">
             Interrogating environmental cache matrices...
           </div>
+        ) : dataAgeHours > 24 ? (
+          <p className="text-sm text-red-400/90 leading-relaxed italic py-2">
+            ⚠️ Telemetry safety window exceeded. Satellite thermal data has been suppressed. Run a fresh cloud ingestion sync before running offshore.
+          </p>
         ) : brief ? (
           <div className="space-y-3">
             <p className="text-sm text-slate-300 leading-relaxed font-medium">
@@ -223,9 +220,7 @@ export default function Dashboard() {
                   Thermal Gradient
                 </span>
                 <span className="text-xs text-emerald-400 font-semibold truncate block mt-0.5">
-                  {brief?.canyon_wall_temp
-                    ? `${brief.shelf_temp} ➔ ${brief.canyon_wall_temp}`
-                    : "Dynamic Breaks Active"}
+                  {brief?.canyon_wall_temp ? `${brief.shelf_temp} ➔ ${brief.canyon_wall_temp}` : "Dynamic Breaks Active"}
                 </span>
               </div>
             </div>
@@ -285,12 +280,12 @@ export default function Dashboard() {
             <div className="flex items-center justify-center gap-1">
               <Thermometer className="w-4 h-4 text-orange-400 flex-shrink-0" />
               <div className="text-xl sm:text-2xl font-bold text-orange-400">
-                {sstResult?.ok ? `${sstResult.fahrenheit.toFixed(1)}°F` : "—"}
+                {sstResult?.ok && dataAgeHours <= 24 ? `${sstResult.fahrenheit.toFixed(1)}°F` : "—"}
               </div>
             </div>
             <div className="text-xs text-slate-400 mt-0.5">
               Offshore SST
-              {sstResult?.ok && <span className={`ml-1 text-[9px] font-medium ${sstResult.resolution === "0.02deg" ? "text-violet-400" : "text-sky-400"}`}>{sstResult.resolution === "0.02deg" ? "ACSPO" : "MUR"}</span>}
+              {sstResult?.ok && dataAgeHours <= 24 && <span className="ml-1 text-[9px] font-medium text-violet-400">ACSPO</span>}
             </div>
           </div>
         </div>
