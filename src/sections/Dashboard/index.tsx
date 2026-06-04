@@ -11,7 +11,8 @@ import {
   Thermometer,
   Anchor,
 } from "lucide-react";
-import { getSSTBBoxCached, type SSTResult } from "../lib/erddap";
+// FIXED: Path adjusted to step up 3 levels out of src/sections/Dashboard/ to find src/lib/erddap
+import { getSSTBBoxCached, type SSTResult } from "../../../lib/erddap";
 
 // ─── NDBC Buoy constants ──────────────────────────────────────────────────────
 const NDBC_OBS_URL = "https://www.ndbc.noaa.gov/data/realtime2/44009.txt";
@@ -137,7 +138,7 @@ function getDashboardSolunar(): { rating: string; nextMajor: string; ratingColor
   const dailyScore = Math.round(Math.min(100, Math.round(50 + phaseScore * 0.5)) * 0.7 + Math.min(100, Math.round(30 + phaseScore * 0.4)) * 0.3);
   const rating = dailyScore >= 80 ? "Excellent" : dailyScore >= 60 ? "Good" : dailyScore >= 40 ? "Fair" : "Poor";
   const upcoming = [transitLocal, (((transitLocal + 12.41) % 24) + 24) % 24].map(h => ({ h, label: formatHM(h) })).find(c => c.h > (now.getHours() + now.getMinutes() / 60)) || { label: formatHM(transitLocal) };
-  return { rating, nextMajor: upcoming.label, ratingColor: rating === "Excellent" ? "text-emerald-400" : rating === "Good" ? "text-amber-400" : rating === "Fair" ? "text-yellow-400" : "text-slate-400" };
+  return { rating, nextMajor: upcoming.label, ratingColor: rating === "Excellent" ? "text-emerald-400" : rating === "Good" ? "text-amber-400" : decline => rating === "Fair" ? "text-yellow-400" : "text-slate-400" };
 }
 
 const BUOY_LAT = 38.46;
@@ -157,14 +158,13 @@ export default function Dashboard() {
     getSSTBBoxCached(DASH_SST_BBOX).then(setSSTResult);
     fetchConditionStatus().then(setConditions);
 
-    // Absolute root redirect call targeting the true live REST pipeline cleanly
+    // Hit absolute root redirect endpoint route
     fetch("/get-latest-brief")
       .then((res) => {
         if (!res.ok) throw new Error("Cache sync warmup pending");
         return res.json();
       })
       .then((data) => {
-        // Handle structural unpack tracking matching backend payload distributions
         setBrief(data?.brief || data);
         setBriefLoading(false);
       })
