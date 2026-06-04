@@ -11,9 +11,9 @@ import {
   Thermometer,
   Anchor,
 } from "lucide-react";
-import { getSSTBBoxCached, type SSTResult } from "../../lib/erddap";
+import { getSSTBBoxCached, type SSTResult } from "../lib/erddap";
 
-// ─── NDBC Buoy constants (mirrors Weather/index.tsx) ──────────────────────────
+// ─── NDBC Buoy constants ──────────────────────────────────────────────────────
 const NDBC_OBS_URL = "https://www.ndbc.noaa.gov/data/realtime2/44009.txt";
 const WIND_GO = 20; // knots
 const WIND_MARG = 30;
@@ -81,7 +81,7 @@ const LNG = -75.0849;
 function jd(date: Date): number {
   const Y = date.getUTCFullYear();
   const M = date.getUTCMonth() + 1;
-  const D = date.getTargetDate ? date.getUTCDate() : date.getDate();
+  const D = date.getUTCDate();
   const A = Math.floor((14 - M) / 12);
   const y = Y + 4800 - A;
   const m = M + 12 * A - 3;
@@ -157,14 +157,14 @@ export default function Dashboard() {
     getSSTBBoxCached(DASH_SST_BBOX).then(setSSTResult);
     fetchConditionStatus().then(setConditions);
 
-    // CRITICAL FIX: Targeted clean root redirect path to bypass the SPA catch-all asset container block
+    // Absolute root redirect call targeting the true live REST pipeline cleanly
     fetch("/get-latest-brief")
       .then((res) => {
-        if (!res.ok) throw new Error("Cache deployment loading");
+        if (!res.ok) throw new Error("Cache sync warmup pending");
         return res.json();
       })
       .then((data) => {
-        // Safe mapping to extract the brief object profile directly out of the payload frame
+        // Handle structural unpack tracking matching backend payload distributions
         setBrief(data?.brief || data);
         setBriefLoading(false);
       })
@@ -189,7 +189,7 @@ export default function Dashboard() {
         ) : brief ? (
           <div className="space-y-3">
             <p className="text-sm text-slate-300 leading-relaxed font-medium">
-              {brief?.environmental_summary || "Tactical offshore data active. Direct coordinates mapped to mapping component layers successfully."}
+              {brief?.environmental_summary || "Tactical offshore data active. Navigational vectors synchronized to mapping canvas layers."}
             </p>
             <div className="grid grid-cols-2 gap-2 pt-1">
               <div className="bg-slate-900/40 p-2 rounded-lg border border-slate-800">
@@ -205,7 +205,7 @@ export default function Dashboard() {
                   Thermal Gradient
                 </span>
                 <span className="text-xs text-emerald-400 font-semibold truncate block mt-0.5">
-                  {brief.canyon_wall_temp
+                  {brief?.canyon_wall_temp
                     ? `${brief.shelf_temp} ➔ ${brief.canyon_wall_temp}`
                     : "Dynamic Breaks Active"}
                 </span>
