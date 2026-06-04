@@ -1,37 +1,48 @@
 # netlify.toml
-# Netlify build & deploy configuration
+# Complete Defensive Path Matrix Alignment Configuration
 # ─────────────────────────────────────────────────────────────────────
 
 [build]
   command   = "npm run build"
   publish   = "dist"
 
-# Netlify Functions configuration routing variables
 [functions]
   directory = "netlify/functions"
 
-# 1. API REWRITE: Map clean endpoint back to the serverless briefing runtime
+# ── Relative Fetch Injections (Fixes the current console crash) ───────
+[[redirects]]
+  from   = "get-latest-brief"
+  to     = "/.netlify/functions/get-latest-brief"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from   = "get-sst-tile"
+  to     = "/.netlify/functions/get-sst-tile"
+  status = 200
+  force  = true
+
+# ── Absolute Fetch Safeguards ─────────────────────────────────────────
 [[redirects]]
   from   = "/get-latest-brief"
   to     = "/.netlify/functions/get-latest-brief"
   status = 200
   force  = true
 
-# 2. PROXY REWRITE: Map tile asset calls cleanly to the SST imagery engine
 [[redirects]]
   from   = "/get-sst-tile"
   to     = "/.netlify/functions/get-sst-tile"
   status = 200
   force  = true
 
-# Explicitly exclude local internal systems from the SPA catch-all parameters
+# ── Explicit Function Direct Pass-through ─────────────────────────────
 [[redirects]]
   from   = "/.netlify/*"
   to     = "/.netlify/:splat"
   status = 200
   force  = true
 
-# SPA redirect — all routes return index.html so React Router works
+# ── SPA Fallback Catch-all ────────────────────────────────────────────
 [[redirects]]
   from   = "/*"
   to     = "/index.html"
