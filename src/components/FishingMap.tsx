@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import { toLoranTD, haversineNm, confidenceColor, speciesFromSST } from "../lib/hotspots";
 import type { HotspotDisplay } from "./FishingMap";
-import { traceThermalFronts } from "../lib/frontTracer";
 
 export interface FishingMapProps {
   mode: "full" | "preview";
@@ -14,6 +13,7 @@ export interface FishingMapProps {
   onHotspotsResolved?: (hotspots: HotspotDisplay[]) => void;
   showHotspots?: boolean;
   showSST?: boolean;
+  sstOffset?: number;
   showBathy?: boolean;
   flyTo?: { lat: number; lng: number; zoom?: number };
   className?: string;
@@ -58,7 +58,7 @@ function buildHotspotPopupHtml(h: HotspotDisplay, allHotspots: HotspotDisplay[])
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
       <span style="color:${color};font-size:18px;font-weight:800;line-height:1">${h.confidence}%</span>
-      <span style="color:#94a3b8;font-size:10px">confidence (vector verified)</span>
+      <span style="color:#94a3b8;font-size:10px">confidence (High-Fidelity)</span>
     </div>
     <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${h.sstTemp.toFixed(1)}°F</strong> &nbsp;&nbsp;${breakVal}</div>
     <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
@@ -84,6 +84,7 @@ export default function FishingMap({
   onHotspotsResolved,
   showHotspots = true,
   showSST = true,
+  sstOffset = 0,
   showBathy = true,
   flyTo,
   className = "",
@@ -91,13 +92,12 @@ export default function FishingMap({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
 
+  const sstLayerRef = useRef<L.TileLayer | null>(null);
   const bathyBaseRef = useRef<L.TileLayer | null>(null);
   const bathyOverlayRef = useRef<L.TileLayer | null>(null);
 
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
-  const frontLinesLayerRef = useRef<L.FeatureGroup | null>(null);
-  const thermalThermalLayerRef = useRef<L.FeatureGroup | null>(null);
 
   const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
   const loadingIds = useRef<Set<string>>(new Set());
@@ -112,58 +112,7 @@ export default function FishingMap({
     setLiveHotspots([]);
     liveHotspotsRef.current = [];
 
-    if (frontLinesLayerRef.current) frontLinesLayerRef.current.clearLayers();
-    if (thermalThermalLayerRef.current) thermalThermalLayerRef.current.clearLayers();
-
     const confirmed: HotspotDisplay[] = [];
-    const sampleGridPoints: { lat: number; lng: number; temp: number }[] = [];
-
-    const checkCompletion = () => {
-      if (loadingIds.current.size === 0) {
-        // Render smooth thermal gradients inside the structured bounding box fields locally
-        if (showSST && thermalThermalLayerRef.current) {
-          hotspotDefs.forEach((def) => {
-            if (def.liveSst && def.searchBbox) {
-              const bounds = L.latLngBounds(
-                [def.searchBbox.minLat, def.searchBbox.minLng],
-                [def.searchBbox.maxLat, def.searchBbox.maxLng]
-              );
-
-              // Render a cohesive background field gradient polygon instead of disconnected circle dots
-              L.rectangle(bounds, {
-                stroke: false,
-                fillColor: def.isPrimaryAI ? "#ef4444" : "#f59e0b", // Primary red filament, secondary orange break
-                fillOpacity: 0.18,
-                interactive: false
-              }).addTo(thermalThermalLayerRef.current!);
-
-              // Surround the local core intrusion with a cold ambient baseline border
-              L.rectangle(bounds, {
-                color: "#3b82f6",
-                weight: 1,
-                fill: false,
-                dashArray: "4, 12",
-                opacity: 0.3,
-                interactive: false
-              }).addTo(thermalThermalLayerRef.current!);
-            }
-          });
-        }
-
-        // Draw razor-sharp front vector trails cleanly over the structural bounding beds
-        if (sampleGridPoints.length > 0 && mapRef.current) {
-          if (frontLinesLayerRef.current) {
-            const vectorizedFronts = traceThermalFronts(sampleGridPoints);
-            vectorizedFronts.forEach((linePoints) => {
-              const latLngs = linePoints.map(p => L.latLng(p.lat, p.lng));
-              L.polyline(latLngs, { color: "#22d3ee", weight: 3, dashArray: "4, 6", opacity: 0.95, interactive: false }).addTo(frontLinesLayerRef.current!);
-            });
-          }
-        }
-        
-        onHotspotsResolved?.(confirmed);
-      }
-    };
 
     hotspotDefs.forEach((h) => {
       if (h.liveSst) {
@@ -185,31 +134,15 @@ export default function FishingMap({
         };
 
         confirmed.push(display);
-
-        if (h.searchBbox) {
-          const steps = 8;
-          const dLat = (h.searchBbox.maxLat - h.searchBbox.minLat) / steps;
-          const dLng = (h.searchBbox.maxLng - h.searchBbox.minLng) / steps;
-          for (let i = 0; i <= steps; i++) {
-            for (let j = 0; j <= steps; j++) {
-              const gLat = h.searchBbox.minLat + (i * dLat);
-              const gLng = h.searchBbox.minLng + (j * dLng);
-              const isNearTarget = Math.abs(gLat - h.lat) < 0.12;
-              const tempSample = isNearTarget ? h.liveSst : (h.liveSst - (h.liveBreak || 3.0));
-              sampleGridPoints.push({ lat: gLat, lng: gLng, temp: tempSample });
-            }
-          }
-        }
-        
         setLiveHotspots((prev) => [...prev.filter((e) => e.id !== h.id), display]);
-        checkCompletion();
+        
+        if (loadingIds.current.size === 0) onHotspotsResolved?.(confirmed);
         return; 
       }
-
       loadingIds.current.delete(h.id);
-      checkCompletion();
+      if (loadingIds.current.size === 0) onHotspotsResolved?.(confirmed);
     });
-  }, [hotspotDefs, showSST]);
+  }, [hotspotDefs]);
 
   // ── Map Initialization Loop ──────────────────────────────────────────
   useEffect(() => {
@@ -221,12 +154,7 @@ export default function FishingMap({
 
     map.createPane("basePane").style.zIndex = "100";
     map.createPane("bathyBasePane").style.zIndex = "250";
-    
-    // Set a high blurring threshold on the thermal raster pane container to smoothly interpolate vectors
-    const sstPane = map.createPane("sstPane");
-    sstPane.style.zIndex = "350";
-    sstPane.style.filter = "blur(14px)"; // Blends raw dataset bounds into smooth continuous water currents
-    
+    map.createPane("sstPane").style.zIndex = "350";
     map.createPane("bathyOverlayPane").style.zIndex = "450";
     map.createPane("labelPane").style.zIndex = "620";
     map.createPane("hotspotPane").style.zIndex = "700";
@@ -239,8 +167,15 @@ export default function FishingMap({
     const bathyOverlay = L.tileLayer(BATHY_OVERLAY_TILE, { opacity: 0.9, pane: "bathyOverlayPane", maxNativeZoom: 10, maxZoom: 14 });
     bathyOverlayRef.current = bathyOverlay; bathyOverlay.addTo(map);
 
-    const thermalLayer = L.featureGroup(); thermalLayer.addTo(map); thermalThermalLayerRef.current = thermalLayer;
-    const frontLinesLayer = L.featureGroup(); frontLinesLayer.addTo(map); frontLinesLayerRef.current = frontLinesLayer;
+    // Securely point the Leaflet tile handler to our backend proxy server function
+    const proxySstUrl = `/.netlify/functions/get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
+    const sstLayer = L.tileLayer(proxySstUrl, {
+      opacity: mode === "full" ? 0.55 : 0.70,
+      pane: "sstPane",
+      maxZoom: 14
+    });
+    
+    sstLayerRef.current = sstLayer; sstLayer.addTo(map);
 
     CANYONS.forEach((c) => {
       L.marker([c.lat, c.lng], {
@@ -253,6 +188,15 @@ export default function FishingMap({
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
   }, []);
+
+  // Sync timeline historical changes directly with the proxy server query params
+  useEffect(() => {
+    const layer = sstLayerRef.current;
+    if (layer) {
+      const proxySstUrl = `/.netlify/functions/get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
+      layer.setUrl(proxySstUrl);
+    }
+  }, [sstOffset]);
 
   useEffect(() => {
     const map = mapRef.current; if (!map) return;
@@ -294,6 +238,11 @@ export default function FishingMap({
     circleMarkersRef.current.forEach((m) => showHotspots ? (!map.hasLayer(m) && m.addTo(map)) : m.remove());
     labelMarkersRef.current.forEach((m) => showHotspots ? (!map.hasLayer(m) && m.addTo(map)) : m.remove());
   }, [showHotspots]);
+
+  useEffect(() => {
+    const map = mapRef.current; const layer = sstLayerRef.current; if (!map || !layer) return;
+    if (showSST) { if (!map.hasLayer(layer)) layer.addTo(map); } else { layer.remove(); }
+  }, [showSST]);
 
   useEffect(() => {
     const map = mapRef.current; if (!map) return;
