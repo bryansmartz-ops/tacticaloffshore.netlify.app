@@ -1,8 +1,7 @@
 // netlify/functions/get-latest-brief.ts
-// Netlify v2 Serverless Function — Fetch Latest Cached Briefing Data
+// Hardened Node.js Serverless Function — Fetch Latest Cached Briefing Data
 // ─────────────────────────────────────────────────────────────────────
 
-import type { Config, Context } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
@@ -17,47 +16,57 @@ const corsHeaders = {
   "Content-Type": "application/json"
 };
 
-export default async function handler(req: Request, context: Context): Promise<Response> {
-  if (req.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: corsHeaders });
+export const handler = async (event: any) => {
+  // Handle pre-flight browser security checks
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 204, headers: corsHeaders, body: "" };
   }
 
-  console.log("[latest-brief] Inbound trigger pass received. Fetching records...");
-
   try {
-    // 1. Fetch latest brief record
-    let { data: brief, error: briefError } = await supabase
+    // 1. Fetch the absolute newest tactical brief log entry
+    let { data: brief } = await supabase
       .from("daily_briefs")
       .select("*")
       .order("forecast_date", { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (briefError) {
-      console.error("[latest-brief] Supabase read failure on daily_briefs:", briefError.message);
+    if (!brief) {
+      const { data: altBrief } = await supabase
+        .from("daily_briefs")
+        .select("*")
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (altBrief) brief = altBrief;
     }
 
-    // 2. Fetch raw data cache
-    const { data: rawCache, error: cacheError } = await supabase
+    // 2. Fetch the backup environmental satellite cache matrix
+    let rawCache = null;
+    const { data: cacheTry1 } = await supabase
       .from("ocean_data_cache")
       .select("*")
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    rawCache = cacheTry1;
 
-    if (cacheError) {
-      console.error("[latest-brief] Supabase read failure on ocean_data_cache:", cacheError.message);
+    if (!rawCache) {
+      const { data: cacheTry2 } = await supabase
+        .from("ocean_data_cache")
+        .select("*")
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      rawCache = cacheTry2;
     }
 
-    console.log("[latest-brief] Database pass completed. brief found:", !!brief, "cache found:", !!rawCache);
-
-    // 3. Fallback variable assembly matching your verified schema columns
+    // 3. Bind properties tightly to your confirmed database object schema keys
     const pLat = brief?.primary_lat || 37.55;
     const pLng = brief?.primary_lng || -74.35;
     const sLat = brief?.secondary_lat || 37.88;
     const sLng = brief?.secondary_lng || -74.12;
     
-    // Safely pull from your sst_data JSON block columns exactly
     const sstVal = brief?.live_sst_value || rawCache?.sst_data?.avgF || rawCache?.sst_data?.maxF || 71.0;
     const breakDelta = brief?.live_break_delta || 2.5;
     const targetDate = brief?.forecast_date || rawCache?.updated_at || new Date().toISOString().split("T")[0];
@@ -74,7 +83,6 @@ export default async function handler(req: Request, context: Context): Promise<R
         secondary_lng: sLng,
         updated_at: targetDate
       },
-      // Keep your frontend loop happy by feeding both standard name profiles
       hotspots: [
         {
           id: "target-1",
@@ -99,16 +107,18 @@ export default async function handler(req: Request, context: Context): Promise<R
       ]
     };
 
-    console.log("[latest-brief] Dispatching completed payload frame to client mapping layers.");
-    return new Response(JSON.stringify(payload), { status: 200, headers: corsHeaders });
+    return {
+      statusCode: 200,
+      headers: corsHeaders,
+      body: JSON.stringify(payload)
+    };
 
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[latest-brief fatal execution error]:", message);
-    return new Response(JSON.stringify({ success: false, error: message }), { status: 500, headers: corsHeaders });
+  } catch (err: any) {
+    console.error("[latest-brief error]:", err.message);
+    return {
+      statusCode: 500,
+      headers: corsHeaders,
+      body: JSON.stringify({ success: false, error: err.message })
+    };
   }
-}
-
-export const config: Config = {
-  path: "/get-latest-brief"
 };
