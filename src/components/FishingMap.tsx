@@ -85,13 +85,14 @@ export default function FishingMap({
     loadMatrixData();
   }, []);
 
-  // 2. HELPER FUNCTION: MATCH CURSOR CLICKS TO TRUE DATABASE CELL
+  // 2. PROXIMITY MAGNET MATCHING LOGIC
   function findClosestSst(lat: number, lng: number): number | null {
-    if (sstMatrix.length === 0) return null;
-    let closestCell = sstMatrix[0];
+    if (!sstMatrix || sstMatrix.length === 0) return null;
+    
+    let closestCell = null;
     let minDistance = Infinity;
 
-    // Fast bounding index scan
+    // Scan matrix to track closest cell vectors
     for (const cell of sstMatrix) {
       const d = Math.pow(cell.lat - lat, 2) + Math.pow(cell.lng - lng, 2);
       if (d < minDistance) {
@@ -99,11 +100,16 @@ export default function FishingMap({
         closestCell = cell;
       }
     }
-    // Return temperature if the click is within a reasonable 4-mile proximity window
-    return minDistance < 0.005 ? closestCell.sst : null;
+
+    // A delta boundary of 0.02 provides a resilient 4.5-mile snap threshold
+    if (closestCell && minDistance < 0.02) {
+      return closestCell.sst;
+    }
+    
+    return null;
   }
 
-  // 3. MAP THE COLOR SPECTRUM BASED ON FAHRENHEIT VALUES
+  // 3. COLOR SECTOR MATRIX GRADIENTS
   function getSstColor(temp: number): string {
     const adjusted = temp + sstOffset;
     if (adjusted >= 74.0) return "rgba(239, 68, 68, 0.45)";   // Royal Stream Core (Red)
@@ -113,7 +119,7 @@ export default function FishingMap({
     return "rgba(59, 130, 246, 0.41)";                        // Basin Cold Water (Blue)
   }
 
-  // 4. GENERATE CLEAN APP STRIKE ZONES ONCE DATA IS FULLY RESOLVED
+  // 4. GENERATE APP STRIKE ZONES ONCE DATA IS FULLY RESOLVED
   useEffect(() => {
     if (sstMatrix.length === 0) return;
 
@@ -166,13 +172,12 @@ export default function FishingMap({
     }
 
     // NATIVE HTML5 CANVAS VECTOR LAYER OVERLAY
-    // Draws the raw database cells perfectly as a responsive grid vector layout
     const CustomCanvasLayer = L.Layer.extend({
       onAdd: function (map: L.Map) {
         const container = L.DomUtil.create("canvas", "leaflet-zoom-animated");
         container.style.position = "absolute";
         container.style.pointerEvents = "none";
-        container.style.mixBlendMode = "multiply"; // Blends colors natively inside the bathymetry contour lines
+        container.style.mixBlendMode = "multiply"; 
         this._canvas = container;
         map.getPane("canvasSstPane")?.appendChild(container);
         map.on("moveend", this._render, this);
@@ -200,7 +205,6 @@ export default function FishingMap({
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Dynamically size vector squares based on active zoom level metrics
         const currentZoom = map.getZoom();
         const rectSize = currentZoom <= 7 ? 4 : currentZoom === 8 ? 8 : currentZoom === 9 ? 16 : 32;
 
@@ -224,7 +228,7 @@ export default function FishingMap({
     canvasLayerRef.current = canvasLayer;
     if (showSST) canvasLayer.addTo(map);
 
-    // CLICK HANDLER: MATCHES MAP INTERSECTIONS STRAIGHT TO TRUE SATELLITE CELL VALUES
+    // CLICK HANDLER: REAL-TIME COORDINATE INTERSECTIONS
     map.on("click", (e: L.LeafletMouseEvent) => {
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
@@ -285,22 +289,4 @@ export default function FishingMap({
         <div style="color:#cbd5e1;font-size:12px;min-width:210px">
           <span style="color:${color};font-weight:700;font-size:13px;display:block;margin-bottom:3px">${h.title}</span>
           <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${(h.sstTemp + sstOffset).toFixed(1)}°F</strong> &nbsp;&nbsp;${breakVal}</div>
-          <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
-          <div style="margin-bottom:4px">${speciesTags}</div>
-        </div>
-      `);
-      circle.addTo(map);
-      circleMarkersRef.current.set(h.id, circle);
-
-      const label = L.marker([h.lat, h.lng], {
-        pane: "labelPane",
-        interactive: false,
-        icon: L.divIcon({ className: "", html: `<div style="display:flex;align-items:center;gap:3px;white-space:nowrap;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color}"></span><span style="color:#fff;font-size:10px;font-weight:600;text-shadow:0 0 3px #000">${h.distanceLabel} • ${(h.sstTemp + sstOffset).toFixed(1)}°</span></div>`, iconAnchor: [60, -10] })
-      });
-      label.addTo(map);
-      labelMarkersRef.current.set(h.id, label);
-    });
-  }, [liveHotspots, showHotspots, sstOffset]);
-
-  return <div ref={containerRef} className={`w-full h-full ${className}`} />;
-}
+          <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x
