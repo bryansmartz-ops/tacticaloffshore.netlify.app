@@ -72,33 +72,40 @@ export const handler = async (event: any) => {
       baseTemp = latestCache.sst_data.avgF || latestCache.sst_data.maxF;
     }
 
-    // ─── DYNAMIC TEMPERATURE FRONT GRADIENT MODEL ─────────────────────
-    // Re-mapped to slice tightly along the continental shelf contours
-    const relativeShelfPosition = (centerLat - 38.3) * 1.8 + (centerLng + 74.2) * 1.4;
-    const eddyWave = Math.sin(centerLat * 12) * 0.12; 
-    const combinedVector = relativeShelfPosition + eddyWave;
+    // ─── HIGH-FREQUENCY TEMPERATURE FRONT ENGINE ─────────────────────
+    // Re-mapped with massive multipliers to generate sharp, winding ribbons 
+    // that contour around the shelf drops rather than massive block blocks.
+    const shelfSlopeIndex = (centerLat - 38.2) * 22.0 + (centerLng + 74.0) * 18.0;
+    
+    // Simulate complex fluid eddy waves compressing against the canyon walls
+    const eddyNoise = Math.sin(centerLat * 65.0) * 1.8 + Math.cos(centerLng * 55.0) * 1.5;
+    const combinedVector = shelfSlopeIndex + eddyNoise;
 
     let tileTemp = baseTemp;
-    if (combinedVector < -0.05) {
-      tileTemp = (baseTemp + 3.2) - Math.abs(combinedVector) * 0.9;
-    } else if (combinedVector > 0.05) {
-      tileTemp = (baseTemp - 5.0) + Math.abs(combinedVector) * 0.7;
+    if (combinedVector < -1.5) {
+      // Warm Core Gulf Stream Margin pushing from SE
+      tileTemp = (baseTemp + 4.5) - Math.abs(combinedVector) * 0.4;
+    } else if (combinedVector > 1.5) {
+      // Clean, cool coastal green water inside the line
+      tileTemp = (baseTemp - 5.5) + Math.abs(combinedVector) * 0.3;
     } else {
-      const mixRatio = (combinedVector + 0.05) / 0.1;
-      tileTemp = (baseTemp + 3.0) - mixRatio * 8.0;
+      // RE-CENTERED HIGH-CONTRAST CONVERGENCE BREAK WALL
+      // Rapidly blends across the transition zone for a authentic satellite appearance
+      const mixRatio = (combinedVector + 1.5) / 3.0;
+      tileTemp = (baseTemp + 4.0) - mixRatio * 9.5;
     }
 
     // ─── HIGH-CONTRAST PALETTE COLOR SELECTION ────────────────────────
-    let fillHex = "#1e3a8a"; 
-    if (tileTemp > 73.8) fillHex = "#b91c1c";      // Gulf Stream Core (Deep Red)
-    else if (tileTemp > 71.8) fillHex = "#ea580c"; // Warm break blend (Orange)
-    else if (tileTemp > 69.8) fillHex = "#eab308"; // THE CONVERGENCE EDGE (Yellow)
-    else if (tileTemp > 67.8) fillHex = "#16a34a"; // Green Transition Water
-    else if (tileTemp >= 65.0) fillHex = "#0284c7"; // Clean Blue Inside Water
+    let fillHex = "#1e3a8a"; // Below 65.5°F: Deep Basin Blue
+    if (tileTemp > 74.0) fillHex = "#b91c1c";      // Gulf Stream Warm Core (Deep Red)
+    else if (tileTemp > 72.0) fillHex = "#ea580c"; // Blended Edge Feeding Zone (Orange)
+    else if (tileTemp > 70.0) fillHex = "#eab308"; // THE BREAK CONVERGENCE LINE (Yellow)
+    else if (tileTemp > 67.5) fillHex = "#16a34a"; // Nutrient Green Water (Green)
+    else if (tileTemp >= 65.0) fillHex = "#0284c7"; // Clean Inside Structure Water (Light Blue)
 
-    // Return the high-resolution vector slice
+    // Return the high-resolution vector slice with enhanced contrast
     const svgString = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-      <rect width="256" height="256" fill="${fillHex}" fill-opacity="0.40" stroke="${fillHex}" stroke-width="0.2" stroke-opacity="0.1"/>
+      <rect width="256" height="256" fill="${fillHex}" fill-opacity="0.45" stroke="${fillHex}" stroke-width="0.1" stroke-opacity="0.1"/>
     </svg>`;
 
     return {
