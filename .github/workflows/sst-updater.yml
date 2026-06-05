@@ -16,10 +16,10 @@ jobs:
     - name: Setup Node.js runtime environment
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '20' # Explicitly matching the runner's fallback engine
 
-    - name: Install Supabase Client Dependency
-      run: npm install @supabase/supabase-js
+    - name: Install Supabase and WebSocket Dependencies
+      run: npm install @supabase/supabase-js ws
 
     - name: Execute Ingestion Script
       env:
