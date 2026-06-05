@@ -37,9 +37,7 @@ const BATHY_BASE_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Oc
 const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
 const EMPTY_SIGNALS = { sstScore: 85, sstBreakScore: 90, chloroScore: 70, altimetryScore: 65, historyReportsScore: 80 };
 
-// Replicates the backend tile engine rounding math to align clicking targets perfectly
 function getSimulatedSST(lat: number, lng: number): { temp: number; breakDelta: number } {
-  // Snap coordinates to a fixed 0.05-degree grid matrix line to prevent zoom drift distortion
   const gridResolution = 0.05;
   const snapLat = Math.round(lat / gridResolution) * gridResolution;
   const snapLng = Math.round(lng / gridResolution) * gridResolution;
@@ -52,16 +50,16 @@ function getSimulatedSST(lat: number, lng: number): { temp: number; breakDelta: 
   let breakDelta = 0.0;
 
   if (combinedVector < -1.5) {
-    temp = 74.5; // Gulf Stream Warm Core
+    temp = 74.5;
   } else if (combinedVector < -0.3) {
-    temp = 72.4; // Blended break water
+    temp = 72.4;
   } else if (combinedVector < 0.3) {
-    temp = 70.2; // Convergence Line
-    breakDelta = 3.2; // Flags a sharp 3.2 degree wall inside the seam
+    temp = 70.2;
+    breakDelta = 3.2;
   } else if (combinedVector < 1.5) {
-    temp = 68.1; // Green transition water
+    temp = 68.1;
   } else {
-    temp = 64.8; // Cool coastal baseline
+    temp = 64.8;
   }
 
   return { temp, breakDelta };
@@ -111,14 +109,12 @@ export default function FishingMap({
 
   const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
 
-  // ─── STABLE GEOGRAPHIC TARGET COMPILATION LOOPS ────────────────────
   useEffect(() => {
     const calculatedSpots: HotspotDisplay[] = [];
     
     CANYONS.forEach((c, index) => {
       const telemetry = getSimulatedSST(c.lat, c.lng);
       
-      // Target verification matches specific offshore canyons
       if (c.name === "Washington" || c.name === "Poorman's" || c.name === "Baltimore" || c.name === "Wilmington") {
         const isPrimary = c.name === "Washington";
         const confidence = isPrimary ? 94 : 84 - index;
@@ -167,10 +163,17 @@ export default function FishingMap({
     bathyOverlayRef.current = bathyOverlay; bathyOverlay.addTo(map);
 
     const proxySstUrl = `/.netlify/functions/get-sst-tile?x={x}&y={y}&z={z}&offset=${sstOffset}`;
-    const sstLayer = L.tileLayer(proxySstUrl, { opacity: 0.65, pane: "sstPane", maxZoom: 14 });
+    
+    // HARDENED RETINA DENSITY ENGINE INTERFACE OVERRIDES
+    const sstLayer = L.tileLayer(proxySstUrl, { 
+      opacity: 0.65, 
+      pane: "sstPane", 
+      maxZoom: 14,
+      tileSize: 256,
+      detectRetina: true 
+    });
     sstLayerRef.current = sstLayer; sstLayer.addTo(map);
 
-    // ─── CROSS-HAIRS INTERSECTION POPUP HANDLER ───────────────────────
     map.on("click", (e: L.LeafletMouseEvent) => {
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
