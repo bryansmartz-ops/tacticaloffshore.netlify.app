@@ -31,8 +31,7 @@ async function runIngestionPipeline() {
   console.log(`📍 Target Sector Box: Lat [${LAT_MIN} to ${LAT_MAX}] | Lng [${LNG_MIN} to ${LNG_MAX}]`);
 
   try {
-    // 3. TARGET THE NOAA SATELLITE ERDDAP SERVER WITH CASE-SPECIFIC PARAMETERS
-    // Case corrected ID to jplMURSST41 and attached explicit 'analysed_sst' variable targeting
+    // 3. TARGET THE NOAA SATELLITE ERDDAP SERVER
     const noaaDatasetId = "jplMURSST41"; 
     const noaaUrl = `https://coastwatch.pfeg.noaa.gov/erddap/griddap/${noaaDatasetId}.json?analysed_sst[last][(${LAT_MIN}):1:(${LAT_MAX})][(${LNG_MIN}):1:(${LNG_MAX})]`;
 
@@ -79,6 +78,9 @@ async function runIngestionPipeline() {
 
       // Convert Kelvin to Fahrenheit
       const sstFahrenheit = ((sstKelvin - 273.15) * 9) / 5 + 32;
+
+      // SAFETY FILTER: Drop anomalies, land reflections, or instrument errors
+      if (sstFahrenheit < 40.0 || sstFahrenheit > 95.0) continue;
 
       // Snap coordinates to uniform grid step cells
       const snapLat = Math.round(rawLat / GRID_STEP) * GRID_STEP;
