@@ -31,15 +31,14 @@ async function runIngestionPipeline() {
   console.log(`📍 Target Sector Box: Lat [${LAT_MIN} to ${LAT_MAX}] | Lng [${LNG_MIN} to ${LNG_MAX}]`);
 
   try {
-    // 3. TARGET THE NOAA SATELLITE ERDDAP SERVER
-    // Using [last] instead of coordinate boundaries simplifies indexing on the NOAA side
-    const noaaDatasetId = "jplMursst41mday"; 
-    const noaaUrl = `https://coastwatch.pfeg.noaa.gov/erddap/griddap/${noaaDatasetId}.json?sst[last][(${LAT_MIN}):1:(${LAT_MAX})][(${LNG_MIN}):1:(${LNG_MAX})]`;
+    // 3. TARGET THE NOAA SATELLITE ERDDAP SERVER WITH CASE-SPECIFIC PARAMETERS
+    // Case corrected ID to jplMURSST41 and attached explicit 'analysed_sst' variable targeting
+    const noaaDatasetId = "jplMURSST41"; 
+    const noaaUrl = `https://coastwatch.pfeg.noaa.gov/erddap/griddap/${noaaDatasetId}.json?analysed_sst[last][(${LAT_MIN}):1:(${LAT_MAX})][(${LNG_MIN}):1:(${LNG_MAX})]`;
 
     console.log("📡 Connecting to NOAA CoastWatch servers...");
     console.log(`🔗 Request URL: ${noaaUrl}`);
     
-    // Set a solid 45-second network timeout abort matrix to prevent raw script stalls
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 45000);
 
@@ -107,7 +106,7 @@ async function runIngestionPipeline() {
     console.log(`✨ Normalized raw telemetry data down into ${upsertPayload.length} uniform spatial grid cells.`);
 
     if (upsertPayload.length === 0) {
-      console.log("⚠️ Warning: No valid temperature records remaining after normalization filter. Check sector cloud cover.");
+      console.log("⚠️ Warning: No valid temperature records remaining after normalization filter.");
       return;
     }
 
