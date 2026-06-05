@@ -3,12 +3,13 @@
 // ─────────────────────────────────────────────────────────────────────
 
 import { createClient } from '@supabase/supabase-js';
+import type { Config } from "@netlify/functions";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Cache-Control": "public, max-age=300" // Cache locally for 5 minutes to save DB reads
+  "Cache-Control": "public, max-age=300" // Cache locally for 5 minutes to protect DB limits
 };
 
 const supabase = createClient(
@@ -16,30 +17,45 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 );
 
-export const handler = async (event: any) => {
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: corsHeaders, body: "" };
+// Modern Netlify serverless handler export pattern
+export default async (request: Request) => {
+  // Handle standard browser preflight safety checks
+  if (request.method === "OPTIONS") {
+    return new Response("", { status: 204, headers: corsHeaders });
   }
 
+  console.log("📡 get-sst-matrix function invoked. Requesting Supabase rows...");
+
   try {
-    // Pull the entire Mid-Atlantic active matrix in a single fast query
+    // Fetch the loaded Mid-Atlantic active fishing matrix coordinates
     const { data, error } = await supabase
       .from('sst_grid_cache')
       .select('lat, lng, sst_fahrenheit')
       .order('lat', { ascending: true });
 
-    if (error) throw error;
+    if (error) {
+      console.error("❌ Supabase fetch operation failed:", error.message);
+      throw error;
+    }
 
-    return {
-      statusCode: 200,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      body: JSON.stringify({ success: true, matrix: data })
-    };
+    console.log(`📦 Successfully pulled ${data?.length || 0} grid rows from the database cache table.`);
+
+    return new Response(
+      JSON.stringify({ success: true, matrix: data }),
+      { 
+        status: 200, 
+        headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      }
+    );
+
   } catch (err: any) {
-    return {
-      statusCode: 500,
-      headers: corsHeaders,
-      body: JSON.stringify({ success: false, error: err.message })
-    };
+    console.error("❌ System-level function crash:", err.message);
+    return new Response(
+      JSON.stringify({ success: false, error: err.message }),
+      { 
+        status: 500, 
+        headers: corsHeaders 
+      }
+    );
   }
 };
