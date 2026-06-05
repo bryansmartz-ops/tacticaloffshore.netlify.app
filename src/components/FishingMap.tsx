@@ -289,4 +289,22 @@ export default function FishingMap({
         <div style="color:#cbd5e1;font-size:12px;min-width:210px">
           <span style="color:${color};font-weight:700;font-size:13px;display:block;margin-bottom:3px">${h.title}</span>
           <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${(h.sstTemp + sstOffset).toFixed(1)}°F</strong> &nbsp;&nbsp;${breakVal}</div>
-          <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x
+          <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
+          <div style="margin-bottom:4px">${speciesTags}</div>
+        </div>
+      `);
+      circle.addTo(map);
+      circleMarkersRef.current.set(h.id, circle);
+
+      const label = L.marker([h.lat, h.lng], {
+        pane: "labelPane",
+        interactive: false,
+        icon: L.divIcon({ className: "", html: `<div style="display:flex;align-items:center;gap:3px;white-space:nowrap;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color}"></span><span style="color:#fff;font-size:10px;font-weight:600;text-shadow:0 0 3px #000">${h.distanceLabel} • ${(h.sstTemp + sstOffset).toFixed(1)}°</span></div>`, iconAnchor: [60, -10] })
+      });
+      label.addTo(map);
+      labelMarkersRef.current.set(h.id, label);
+    });
+  }, [liveHotspots, showHotspots, sstOffset]);
+
+  return <div ref={containerRef} className={`w-full h-full ${className}`} />;
+}
