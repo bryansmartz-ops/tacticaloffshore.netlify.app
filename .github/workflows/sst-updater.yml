@@ -1,0 +1,28 @@
+name: Automated SST Matrix Ingestion
+
+on:
+  schedule:
+    - cron: '0 5 * * *'
+  workflow_dispatch: 
+
+jobs:
+  update-matrix:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js runtime environment
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Supabase Client Dependency
+      run: npm install @supabase/supabase-js
+
+    - name: Execute Ingestion Script
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      run: node scripts/update-sst-matrix.js
