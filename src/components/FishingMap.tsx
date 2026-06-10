@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Vector Canvas Grid Mapping Engine - True Contour Interpolation Edition
+// High-Fidelity Vector Canvas Grid Mapping Engine - Core Stability Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -67,7 +67,7 @@ export default function FishingMap({
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  // 1. FETCH LIVE SATELLITE MATRIX WITH INTEGRATED COASTLINE POLYNOMIAL CONTOUR ENGINE
+  // 1. FETCH SATELLITE MATRIX WITH POLYNOMIAL COASTLINE MASKING
   useEffect(() => {
     async function loadMatrixData() {
       try {
@@ -83,33 +83,27 @@ export default function FishingMap({
           return;
         }
       } catch (err) {
-        // Fallback matrix execution kicks in if database sync transitions are active
+        // Fallback grid fires natively if serverless connection layer is adapting
       }
 
       const contouredGrid: GridCell[] = [];
-      const resolutionStep = 0.02; // Tight resolution step to increase vector interpolation accuracy
+      const resolutionStep = 0.03; // Hardened step size protects memory bounds and optimization loops
 
       for (let lat = 34.8; lat <= 40.8; lat += resolutionStep) {
-        // HIGH-FIDELITY COASTLINE TRACKER MATH: Uses multi-wave trigonometric interpolation
-        // Wraps perfectly around Cape Hatteras, curves into the DelMarVa shelf, and contours up the NJ coast
         let baseCoastLng = -75.5;
         if (lat < 35.2) {
-          baseCoastLng = -75.47 - (35.2 - lat) * 0.8; // Hatteras Outward Peak Anchor
+          baseCoastLng = -75.47 - (35.2 - lat) * 0.8; 
         } else if (lat >= 35.2 && lat < 38.5) {
-          baseCoastLng = -75.52 + (lat - 35.2) * 0.44 + Math.sin((lat - 35.2) * 1.4) * 0.18; // DelMarVa Inward Curve Bight
+          baseCoastLng = -75.52 + (lat - 35.2) * 0.44 + Math.sin((lat - 35.2) * 1.4) * 0.18; 
         } else {
-          baseCoastLng = -74.85 + (lat - 38.5) * 0.22 - Math.cos((lat - 38.5) * 1.9) * 0.12; // Delaware Bay Delta to North NJ Bulge
+          baseCoastLng = -74.85 + (lat - 38.5) * 0.22 - Math.cos((lat - 38.5) * 1.9) * 0.12; 
         }
 
         for (let lng = -76.5; lng <= -70.5; lng += resolutionStep) {
-          // Coastline clipping mask protects inland sounds/bays from thermal color bleeding
           if (lng < baseCoastLng - 0.04) continue; 
 
-          // Calculate distance vector outward relative to the 100-fathom continental shelf break line
           const shelfDistance = lng - baseCoastLng;
           const shelfSlope = (lat - 38.3) * 1.8 + (lng + 74.0) * 3.2;
-          
-          // Gulf Stream eddy simulation introduces natural thermal fluid wave breaks
           const fluidWaves = Math.sin(lat * 6.5 + lng * 4.0) * 1.6 + Math.cos(lng * 8.5 - lat * 3.0) * 1.2;
           
           let calcSst = 72.0 + (shelfDistance * 5.2) - (shelfSlope * 0.5) + fluidWaves;
@@ -140,20 +134,20 @@ export default function FishingMap({
         closestCell = cell;
       }
     }
-    if (closestCell && minDistance < 0.04) {
+    if (closestCell && minDistance < 0.06) {
       return closestCell.sst;
     }
     return null;
   }
 
-  // 3. COLOR SECTOR GRADIENT PLOTS
+  // 3. COLOR GRADIENT DRIVERS
   function getSstColor(temp: number): string {
     const adjusted = temp + sstOffset;
-    if (adjusted >= 75.5) return "#b91c1c";   // Core Stream Wall (Deep Red)
-    if (adjusted >= 72.5) return "#ea580c";   // Warm Margin Transition (Orange)
+    if (adjusted >= 75.5) return "#b91c1c";   // Gulf Stream Core (Red)
+    if (adjusted >= 72.5) return "#ea580c";   // Warm Margin Break (Orange)
     if (adjusted >= 69.5) return "#ca8a04";   // Concentrated Thermal Seam (Yellow)
     if (adjusted >= 66.0) return "#16a34a";   // Transition Water Profile (Green)
-    return "#2563eb";                         // Cooler Shelf Water (Blue)
+    return "#2563eb";                         // Cooler Shelf Basin Water (Blue)
   }
 
   // 4. GENERATE APP STRIKE ZONES ONCE DATA IS FULLY RESOLVED
@@ -201,8 +195,7 @@ export default function FishingMap({
     map.createPane("labelPane").style.zIndex = "500";
     map.createPane("hotspotPane").style.zIndex = "600";
 
-    const baseTileLayer = L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { pane: "basePane" });
-    baseTileLayer.addTo(map);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { pane: "basePane" }).addTo(map);
 
     bathyBaseLayerRef.current = L.tileLayer(BATHY_BASE_TILE, { opacity: 0.55, pane: "bathyBasePane" });
     bathyOverlayLayerRef.current = L.tileLayer(BATHY_OVERLAY_TILE, { opacity: 0.45, pane: "bathyOverlayPane" });
@@ -212,23 +205,20 @@ export default function FishingMap({
       bathyOverlayLayerRef.current.addTo(map);
     }
 
-    // INTERPOLATED CANVAS SATELLITE BLUR ENGINE LAYER
+    // STABLE SUB-PANEL CANVAS LAYER COMPONENT
     const CustomCanvasLayer = L.Layer.extend({
       onAdd: function (currentMap: L.Map) {
         const container = L.DomUtil.create("canvas", "leaflet-zoom-animated");
         container.style.position = "absolute";
         container.style.pointerEvents = "none";
-        
-        // Balanced Global Alpha Opacity gives high legibility to bottom details
-        container.style.opacity = "0.45"; 
-        
+        container.style.opacity = "0.45"; // Controlled visibility anchor protects bathymetric visibility
         this._canvas = container;
         currentMap.getPane("canvasSstPane")?.appendChild(container);
         currentMap.on("moveend zoomend", this._render, this);
         this._render();
       },
       onRemove: function (currentMap: L.Map) {
-        this._canvas.remove();
+        if (this._canvas) this._canvas.remove();
         currentMap.off("moveend zoomend", this._render, this);
       },
       _render: function () {
@@ -243,20 +233,18 @@ export default function FishingMap({
         
         const topLeft = map.containerPointToLayerPoint([0, 0]);
         L.DomUtil.setPosition(canvas, topLeft);
-        
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // Read scope array flags cleanly
         if (sstMatrix.length === 0) return;
 
         const currentZoom = map.getZoom();
         
-        // CRITICAL SPATIAL INTERPOLATION BLUR FILTER: Wipes out harsh square borders
-        // Blends individual cell matrix edges into a continuous fluid thermal gradient flow
-        const blurRadius = currentZoom <= 7 ? 8 : currentZoom === 8 ? 14 : currentZoom === 9 ? 24 : 44;
+        // INTERPOLATED BLUR MATRIX CONVOLUTION - Softens box contours dynamically
+        const blurRadius = currentZoom <= 7 ? 10 : currentZoom === 8 ? 16 : currentZoom === 9 ? 28 : 52;
         ctx.filter = `blur(${blurRadius}px)`;
 
-        // Adjust expansion boundaries to lock grid edges perfectly during zoom adjustments
-        const pixelExpansion = currentZoom <= 6 ? 6 : currentZoom === 7 ? 12 : currentZoom === 8 ? 24 : currentZoom === 9 ? 48 : 96;
+        const pixelExpansion = currentZoom <= 6 ? 8 : currentZoom === 7 ? 16 : currentZoom === 8 ? 32 : currentZoom === 9 ? 64 : 128;
 
         sstMatrix.forEach((cell) => {
           const latLng = L.latLng(cell.lat, cell.lng);
@@ -266,8 +254,8 @@ export default function FishingMap({
             ctx.fillRect(
               containerPoint.x - pixelExpansion / 2,
               containerPoint.y - pixelExpansion / 2,
-              pixelExpansion + 1.5, // Overlap margin ensures anti-aliasing seams blend perfectly under blur filter
-              pixelExpansion + 1.5
+              pixelExpansion + 2.0, // Overlap margin blends boundaries cleanly under canvas blur context
+              pixelExpansion + 2.0
             );
           }
         });
@@ -276,15 +264,11 @@ export default function FishingMap({
 
     canvasLayerRef.current = new (CustomCanvasLayer as any)();
 
-    // LEAFLET LIFECYCLE EVENT BINDERS: Forces instant, automatic paint optimization on boot
-    map.on("layeradd", () => {
-      if (canvasLayerRef.current && showSST) canvasLayerRef.current._render();
-    });
-    baseTileLayer.on("load", () => {
-      if (canvasLayerRef.current && showSST) canvasLayerRef.current._render();
-    });
+    if (showSST) {
+      canvasLayerRef.current.addTo(map);
+    }
 
-    // CLICK HANDLER: TELEMETRY POPUPS
+    // CLICK TELEMETRY HOVER POPUPS
     map.on("click", (e: L.LeafletMouseEvent) => {
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
@@ -321,14 +305,7 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, [sstMatrix]);
 
-  // 6. ADAPTIVE BOOTSTRAP AUTO-REPAINT HANDLER
-  useEffect(() => {
-    if (canvasLayerRef.current && mapRef.current && showSST) {
-      canvasLayerRef.current._render();
-    }
-  }, [sstMatrix, showSST, sstOffset]);
-
-  // 7. LAYER SYNC CONTROL EFFECT
+  // 6. ISOLATED REACT-DRIVEN LAYER SYNC EFFECT (STRICT NO-LOOP ISOLATION ARCHITECTURE)
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -345,15 +322,18 @@ export default function FishingMap({
 
     if (canvasLayerRef.current) {
       if (showSST) {
-        if (!map.hasLayer(canvasLayerRef.current)) map.addLayer(canvasLayerRef.current);
-        canvasLayerRef.current._render(); 
+        if (!map.hasLayer(canvasLayerRef.current)) {
+          map.addLayer(canvasLayerRef.current);
+        } else {
+          canvasLayerRef.current._render(); // Smooth repaint without re-triggering map event flags
+        }
       } else {
         if (map.hasLayer(canvasLayerRef.current)) map.removeLayer(canvasLayerRef.current);
       }
     }
-  }, [showBathy, showSST]);
+  }, [showBathy, showSST, sstOffset]);
 
-  // 8. SYNC HOTSPOT MARKERS
+  // 7. SYNC HOTSPOT MARKERS
   useEffect(() => {
     const map = mapRef.current;
     if (!map || liveHotspots.length === 0) return;
@@ -386,13 +366,4 @@ export default function FishingMap({
 
       const label = L.marker([h.lat, h.lng], {
         pane: "labelPane",
-        interactive: false,
-        icon: L.divIcon({ className: "", html: `<div style="display:flex;align-items:center;gap:3px;white-space:nowrap;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color}"></span><span style="color:#fff;font-size:10px;font-weight:600;text-shadow:0 0 3px #000">${h.distanceLabel} • ${(h.sstTemp + sstOffset).toFixed(1)}°</span></div>`, iconAnchor: [60, -10] })
-      });
-      label.addTo(map);
-      labelMarkersRef.current.set(h.id, label);
-    });
-  }, [liveHotspots, showHotspots, sstOffset]);
-
-  return <div ref={containerRef} className={`w-full h-full ${className}`} />;
-}
+        interactive:
