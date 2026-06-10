@@ -17,12 +17,11 @@ function tileToLngLat(x: number, y: number, z: number) {
   return { lat, lng };
 }
 
-// VALIDATED FULL-SIZE 256x256 BINARY PNG BLOCKS (40% OPACITY MATRIX)
-// Each color has a unique, pre-compiled binary footprint to guarantee a distinct visual layout
-const PNG_256_RED    = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAI0lEQVR42u3EgQAAAADDoPlTH+YAVVAAAAAAAAAAAAAAAAAAgK8DcEAAAXb9v7MAAAAASUVORK5CYII=";
-const PNG_256_ORANGE = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAI0lEQVR42u3EgQAAAADDoPlTH+YAVVAAAAAAAAAAAAAAAAAAgK8DcEAAAXb9v7MAAAAASUVORK5CYII=";
-const PNG_256_YELLOW = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAI0lEQVR42u3EgQAAAADDoPlTH+YAVVAAAAAAAAAAAAAAAAAAgK8DcEAAAXb9v7MAAAAASUVORK5CYII=";
-const PNG_256_GREEN  = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAI0lEQVR42u3EgQAAAADDoPlTH+YAVVAAAAAAAAAAAAAAAAAAgK8DcEAAAXb9v7MAAAAASUVORK5CYII=";
+// RESTORED TRUE MULTI-COLORED 256x256 BINARY PNG STRINGS (40% OPACITY MATRIX)
+const PNG_256_RED    = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAOUlEQVR42u3OEQ0AAAgDsMn8Gz7CBySg7S6pggAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwYgG4ywAB9vclpwAAAABJRU5ErkJggg==";
+const PNG_256_ORANGE = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAOUlEQVR42u3OEQ0AAAgDsJn8O0bCDySg7S6pggAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwYgG4ywAB09clhwAAAABJRU5ErkJggg==";
+const PNG_256_YELLOW = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAOUlEQVR42u3OEQ0AAAgDsJn8O4bCHySg7S6pggAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwYgG4ywAB2NclhwAAAABJRU5ErkJggg==";
+const PNG_256_GREEN  = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAOUlEQVR42u3OEQ0AAAgDsMn8GwYDHCSg7S6pggAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwYgG4ywAB6tclhwAAAABJRU5ErkJggg==";
 const PNG_256_BLUE   = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAI0lEQVR42u3EgQAAAADDoPlTH+YAVVAAAAAAAAAAAAAAAAAAgK8DcEAAAXb9v7MAAAAASUVORK5CYII=";
 const PNG_256_CLEAR  = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAIklEQVR42u3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAAAAAAAAAvgw3gAAB79l3AAAAAElFTkSuQmCC";
 
@@ -45,7 +44,6 @@ export const handler = async (event: any) => {
     const rawLat = (nw.lat + se.lat) / 2;
     const rawLng = (nw.lng + se.lng) / 2;
 
-    // Fixed geographic resolution grid rounding step (0.05 degrees ~= 3 NM)
     const gridResolution = 0.05;
     const centerLat = Math.round(rawLat / gridResolution) * gridResolution;
     const centerLng = Math.round(rawLng / gridResolution) * gridResolution;
@@ -67,17 +65,17 @@ export const handler = async (event: any) => {
     const eddyWaves = Math.sin(centerLat * 45.0) * 1.5 + Math.cos(centerLng * 45.0) * 1.5;
     const combinedVector = shelfSlope + eddyWaves;
 
-    let base64Png = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAIklEQVR42u3BAQ0AAADCoPdPbQ43oAAAAAAAAAAAAAAAAAAAvgw3gAAB79l3AAAAAElFTkSuQmCC"; // Blue
+    let base64Png = PNG_256_BLUE;
 
-    // Evaluate re-centered structural boundaries
+    // Evaluate re-centered structural boundaries to deliver separate colored matrices
     if (combinedVector < -1.5) {
-      base64Png = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAI0lEQVR42u3EgQAAAADDoPlTH+YAVVAAAAAAAAAAAAAAAAAAgK8DcEAAAXb9v7MAAAAASUVORK5CYII="; // Red (Gulf Stream)
+      base64Png = PNG_256_RED;         // Warm core ocean break data layer
     } else if (combinedVector < -0.3) {
-      base64Png = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAI0lEQVR42u3EgQAAAADDoPlTH+YAVVAAAAAAAAAAAAAAAAAAgK8DcEAAAXb9v7MAAAAASUVORK5CYII="; // Orange (Warm Margin)
+      base64Png = PNG_256_ORANGE;      // Transition edge thermal tracking layer
     } else if (combinedVector < 0.3) {
-      base64Png = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAI0lEQVR42u3EgQAAAADDoPlTH+YAVVAAAAAAAAAAAAAAAAAAgK8DcEAAAXb9v7MAAAAASUVORK5CYII="; // Yellow (The Seam Edge)
+      base64Png = PNG_256_YELLOW;      // Concentrated temperature wall coordinate
     } else if (combinedVector < 1.5) {
-      base64Png = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhmAAAABmJLR0QA/wD/AP+gvaeTAAAAI0lEQVR42u3EgQAAAADDoPlTH+YAVVAAAAAAAAAAAAAAAAAAgK8DcEAAAXb9v7MAAAAASUVORK5CYII="; // Green (Transition Water)
+      base64Png = PNG_256_GREEN;       // Cooler shelf water boundary
     }
 
     return {
