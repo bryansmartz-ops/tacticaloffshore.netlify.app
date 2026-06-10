@@ -254,4 +254,85 @@ export default function FishingMap({
 
     if (!showSST || sstMatrix.length === 0) return;
 
-    sstMatrix.forEach((
+    sstMatrix.forEach((cell) => {
+      const color = getSstColor(cell.sst);
+      
+      // L.circle anchors the radius to real-world meters so cells scale proportionally as you zoom in
+      L.circle([cell.lat, cell.lng], {
+        pane: "sstPane",
+        radius: 3600, // 3,600 meters (~2 nautical miles) fuses the layout points smoothly
+        stroke: false,
+        fillColor: color,
+        fillOpacity: 0.38, 
+        interactive: false
+      }).addTo(sstGroup);
+    });
+  }, [sstMatrix, showSST, sstOffset]);
+
+  // 7. LAYER SYNC CONTROL EFFECT
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (bathyBaseLayerRef.current && bathyOverlayLayerRef.current) {
+      if (showBathy) {
+        if (!map.hasLayer(bathyBaseLayerRef.current)) map.addLayer(bathyBaseLayerRef.current);
+        if (!map.hasLayer(bathyOverlayLayerRef.current)) map.addLayer(bathyOverlayLayerRef.current);
+      } else {
+        if (map.hasLayer(bathyBaseLayerRef.current)) map.removeLayer(bathyBaseLayerRef.current);
+        if (map.hasLayer(bathyOverlayLayerRef.current)) map.removeLayer(bathyOverlayLayerRef.current);
+      }
+    }
+
+    if (sstLayerGroupRef.current) {
+      if (showSST) {
+        if (!map.hasLayer(sstLayerGroupRef.current)) map.addLayer(sstLayerGroupRef.current);
+      } else {
+        if (map.hasLayer(sstLayerGroupRef.current)) map.removeLayer(sstLayerGroupRef.current);
+      }
+    }
+  }, [showBathy, showSST]);
+
+  // 8. SYNC HOTSPOT MARKERS
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || liveHotspots.length === 0) return;
+
+    circleMarkersRef.current.forEach(m => m.remove());
+    labelMarkersRef.current.forEach(m => m.remove());
+    circleMarkersRef.current.clear();
+    labelMarkersRef.current.clear();
+
+    if (!showHotspots) return;
+
+    liveHotspots.forEach((h) => {
+      const color = confidenceColor(h.confidence);
+      const circle = L.circleMarker([h.lat, h.lng], { pane: "hotspotPane", radius: 12, color, fillColor: color, fillOpacity: 0.4, weight: 2 });
+      
+      const breakVal = h.breakDelta > 0 ? `🔥 +${h.breakDelta.toFixed(1)}°F break wall` : `gradual slope`;
+      const td = toLoranTD(h.lat, h.lng);
+      const speciesTags = h.species.map((s) => `<span style="background:rgba(6,182,212,0.2);color:#67e8f9;border-radius:999px;padding:1px 7px;font-size:10px;margin-right:3px">${s}</span>`).join("");
+
+      circle.bindPopup(`
+        <div style="color:#cbd5e1;font-size:12px;min-width:210px">
+          <span style="color:${color};font-weight:700;font-size:13px;display:block;margin-bottom:3px">${h.title}</span>
+          <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${(h.sstTemp + sstOffset).toFixed(1)}°F</strong> &nbsp;&nbsp;${breakVal}</div>
+          <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
+          <div style="margin-bottom:4px">${speciesTags}</div>
+        </div>
+      `);
+      circle.addTo(map);
+      circleMarkersRef.current.set(h.id, circle);
+
+      const label = L.marker([h.lat, h.lng], {
+        pane: "labelPane",
+        interactive: false,
+        icon: L.divIcon({ className: "", html: `<div style="display:flex;align-items:center;gap:3px;white-space:nowrap;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color}"></span><span style="color:#fff;font-size:10px;font-weight:600;text-shadow:0 0 3px #000">${h.distanceLabel} • ${(h.sstTemp + sstOffset).toFixed(1)}°</span></div>`, iconAnchor: [60, -10] })
+      });
+      label.addTo(map);
+      labelMarkersRef.current.set(h.id, label);
+    });
+  }, [liveHotspots, showHotspots, sstOffset]);
+
+  return <div ref={containerRef} className={`w-full h-full ${className}`} />;
+}
