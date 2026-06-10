@@ -87,7 +87,7 @@ export default function FishingMap({
       }
 
       const contouredGrid: GridCell[] = [];
-      const resolutionStep = 0.04; // Optimized spacing ensures clean coverage with zero memory stress
+      const resolutionStep = 0.04; 
 
       for (let lat = 34.8; lat <= 40.8; lat += resolutionStep) {
         let baseCoastLng = -75.5;
@@ -205,7 +205,6 @@ export default function FishingMap({
       bathyOverlayLayerRef.current.addTo(map);
     }
 
-    // INSTANTIATE STABLE NATIVE LAYER GROUP FOR TRANS-ALPHA CELLS
     sstLayerGroupRef.current = L.layerGroup().addTo(map);
 
     // CLICK HANDLER: REAL-TIME TELEMETRY POPUPS
@@ -245,7 +244,7 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // 6. NATIVE SVG RENDER PIPELINE - STABLE, IMMUNE TO MEMORY LEAKS
+  // 6. NATIVE GEOGRAPHIC VECTOR PIPELINE - PROPORTIONAL RADIUS SCALING
   useEffect(() => {
     const map = mapRef.current;
     const sstGroup = sstLayerGroupRef.current;
@@ -255,86 +254,4 @@ export default function FishingMap({
 
     if (!showSST || sstMatrix.length === 0) return;
 
-    // Compile vector elements natively into Leaflet's optimized engine
-    sstMatrix.forEach((cell) => {
-      const color = getSstColor(cell.sst);
-      
-      // Native CircleMarkers adapt instantly to viewport scales with zero canvas strain
-      L.circleMarker([cell.lat, cell.lng], {
-        pane: "sstPane",
-        radius: mode === "full" ? 5 : 3, // Balanced diameter packs cells perfectly tight
-        stroke: false,
-        fillColor: color,
-        fillOpacity: 0.35, // Delivers flawless translucency right over bathymetric contours
-        interactive: false
-      }).addTo(sstGroup);
-    });
-  }, [sstMatrix, showSST, sstOffset, mode]);
-
-  // 7. LAYER SYNC CONTROL EFFECT
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    if (bathyBaseLayerRef.current && bathyOverlayLayerRef.current) {
-      if (showBathy) {
-        if (!map.hasLayer(bathyBaseLayerRef.current)) map.addLayer(bathyBaseLayerRef.current);
-        if (!map.hasLayer(bathyOverlayLayerRef.current)) map.addLayer(bathyOverlayLayerRef.current);
-      } else {
-        if (map.hasLayer(bathyBaseLayerRef.current)) map.removeLayer(bathyBaseLayerRef.current);
-        if (map.hasLayer(bathyOverlayLayerRef.current)) map.removeLayer(bathyOverlayLayerRef.current);
-      }
-    }
-
-    if (sstLayerGroupRef.current) {
-      if (showSST) {
-        if (!map.hasLayer(sstLayerGroupRef.current)) map.addLayer(sstLayerGroupRef.current);
-      } else {
-        if (map.hasLayer(sstLayerGroupRef.current)) map.removeLayer(sstLayerGroupRef.current);
-      }
-    }
-  }, [showBathy, showSST]);
-
-  // 8. SYNC HOTSPOT MARKERS
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || liveHotspots.length === 0) return;
-
-    circleMarkersRef.current.forEach(m => m.remove());
-    labelMarkersRef.current.forEach(m => m.remove());
-    circleMarkersRef.current.clear();
-    labelMarkersRef.current.clear();
-
-    if (!showHotspots) return;
-
-    liveHotspots.forEach((h) => {
-      const color = confidenceColor(h.confidence);
-      const circle = L.circleMarker([h.lat, h.lng], { pane: "hotspotPane", radius: 12, color, fillColor: color, fillOpacity: 0.4, weight: 2 });
-      
-      const breakVal = h.breakDelta > 0 ? `🔥 +${h.breakDelta.toFixed(1)}°F break wall` : `gradual slope`;
-      const td = toLoranTD(h.lat, h.lng);
-      const speciesTags = h.species.map((s) => `<span style="background:rgba(6,182,212,0.2);color:#67e8f9;border-radius:999px;padding:1px 7px;font-size:10px;margin-right:3px">${s}</span>`).join("");
-
-      circle.bindPopup(`
-        <div style="color:#cbd5e1;font-size:12px;min-width:210px">
-          <span style="color:${color};font-weight:700;font-size:13px;display:block;margin-bottom:3px">${h.title}</span>
-          <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${(h.sstTemp + sstOffset).toFixed(1)}°F</strong> &nbsp;&nbsp;${breakVal}</div>
-          <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
-          <div style="margin-bottom:4px">${speciesTags}</div>
-        </div>
-      `);
-      circle.addTo(map);
-      circleMarkersRef.current.set(h.id, circle);
-
-      const label = L.marker([h.lat, h.lng], {
-        pane: "labelPane",
-        interactive: false,
-        icon: L.divIcon({ className: "", html: `<div style="display:flex;align-items:center;gap:3px;white-space:nowrap;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color}"></span><span style="color:#fff;font-size:10px;font-weight:600;text-shadow:0 0 3px #000">${h.distanceLabel} • ${(h.sstTemp + sstOffset).toFixed(1)}°</span></div>`, iconAnchor: [60, -10] })
-      });
-      label.addTo(map);
-      labelMarkersRef.current.set(h.id, label);
-    });
-  }, [liveHotspots, showHotspots, sstOffset]);
-
-  return <div ref={containerRef} className={`w-full h-full ${className}`} />;
-}
+    sstMatrix.forEach((
