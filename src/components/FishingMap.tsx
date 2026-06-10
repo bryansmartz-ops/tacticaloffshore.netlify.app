@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Vector Grid Mapping Engine - High Stability Production Edition
+// High-Fidelity Vector Grid Mapping Engine - Production Mesh Grid Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -83,11 +83,11 @@ export default function FishingMap({
           return;
         }
       } catch (err) {
-        // Fallback grid generation keeps system alive seamlessly
+        // Fallback matrix execution is triggered seamlessly if server pipelines transition
       }
 
       const contouredGrid: GridCell[] = [];
-      const resolutionStep = 0.04; 
+      const resolutionStep = 0.04; // Core resolution interval matching matrix grid bounds
 
       for (let lat = 34.8; lat <= 40.8; lat += resolutionStep) {
         let baseCoastLng = -75.5;
@@ -186,7 +186,15 @@ export default function FishingMap({
 
     const initCenter: [number, number] = [38.1, -74.0];
     const initZoom = mode === "full" ? 8 : 7;
-    const map = L.map(containerRef.current, { center: initCenter, zoom: initZoom, zoomControl: false });
+    
+    // CRITICAL MAXZOOM AND ZOOMSNAP GUARDS: Caps viewport scaling to protect ESRI server boundaries
+    const map = L.map(containerRef.current, { 
+      center: initCenter, 
+      zoom: initZoom, 
+      zoomControl: false,
+      maxZoom: 10,
+      minZoom: 5
+    });
 
     map.createPane("basePane").style.zIndex = "100";
     map.createPane("bathyBasePane").style.zIndex = "200";
@@ -197,8 +205,8 @@ export default function FishingMap({
 
     L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { pane: "basePane" }).addTo(map);
 
-    bathyBaseLayerRef.current = L.tileLayer(BATHY_BASE_TILE, { opacity: 0.55, pane: "bathyBasePane" });
-    bathyOverlayLayerRef.current = L.tileLayer(BATHY_OVERLAY_TILE, { opacity: 0.45, pane: "bathyOverlayPane" });
+    bathyBaseLayerRef.current = L.tileLayer(BATHY_BASE_TILE, { maxZoom: 10, opacity: 0.55, pane: "bathyBasePane" });
+    bathyOverlayLayerRef.current = L.tileLayer(BATHY_OVERLAY_TILE, { maxZoom: 10, opacity: 0.45, pane: "bathyOverlayPane" });
 
     if (showBathy) {
       bathyBaseLayerRef.current.addTo(map);
@@ -244,7 +252,7 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // 6. NATIVE GEOGRAPHIC VECTOR PIPELINE - PROPORTIONAL RADIUS SCALING
+  // 6. PRODUCTION MESH GRID PIPELINE - FUSES EDGES FLUSH AT ALL SCALES
   useEffect(() => {
     const map = mapRef.current;
     const sstGroup = sstLayerGroupRef.current;
@@ -254,16 +262,22 @@ export default function FishingMap({
 
     if (!showSST || sstMatrix.length === 0) return;
 
+    const step = 0.04; 
+    const halfStep = step / 2;
+
     sstMatrix.forEach((cell) => {
       const color = getSstColor(cell.sst);
       
-      // L.circle anchors the radius to real-world meters so cells scale proportionally as you zoom in
-      L.circle([cell.lat, cell.lng], {
+      // Map absolute geometric geographic bounding boxes flush edge-to-edge
+      const southWest = L.latLng(cell.lat - halfStep, cell.lng - halfStep);
+      const northEast = L.latLng(cell.lat + halfStep, cell.lng + halfStep);
+      const bounds = L.latLngBounds(southWest, northEast);
+
+      L.rectangle(bounds, {
         pane: "sstPane",
-        radius: 3600, // 3,600 meters (~2 nautical miles) fuses the layout points smoothly
         stroke: false,
         fillColor: color,
-        fillOpacity: 0.38, 
+        fillOpacity: 0.28, // Perfect translucency lets bathymetric contours show cleanly beneath
         interactive: false
       }).addTo(sstGroup);
     });
