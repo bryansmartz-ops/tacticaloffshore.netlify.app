@@ -83,11 +83,11 @@ export default function FishingMap({
           return;
         }
       } catch (err) {
-        // Fallback grid fires natively if serverless connection layer is adapting
+        // Fallback matrix execution kicks in if database sync transitions are active
       }
 
       const contouredGrid: GridCell[] = [];
-      const resolutionStep = 0.03; // Hardened step size protects memory bounds and optimization loops
+      const resolutionStep = 0.03; 
 
       for (let lat = 34.8; lat <= 40.8; lat += resolutionStep) {
         let baseCoastLng = -75.5;
@@ -211,7 +211,7 @@ export default function FishingMap({
         const container = L.DomUtil.create("canvas", "leaflet-zoom-animated");
         container.style.position = "absolute";
         container.style.pointerEvents = "none";
-        container.style.opacity = "0.45"; // Controlled visibility anchor protects bathymetric visibility
+        container.style.opacity = "0.45"; 
         this._canvas = container;
         currentMap.getPane("canvasSstPane")?.appendChild(container);
         currentMap.on("moveend zoomend", this._render, this);
@@ -235,12 +235,11 @@ export default function FishingMap({
         L.DomUtil.setPosition(canvas, topLeft);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        // Read scope array flags cleanly
         if (sstMatrix.length === 0) return;
 
         const currentZoom = map.getZoom();
         
-        // INTERPOLATED BLUR MATRIX CONVOLUTION - Softens box contours dynamically
+        // INTERPOLATED BLUR MATRIX CONVOLUTION
         const blurRadius = currentZoom <= 7 ? 10 : currentZoom === 8 ? 16 : currentZoom === 9 ? 28 : 52;
         ctx.filter = `blur(${blurRadius}px)`;
 
@@ -254,7 +253,7 @@ export default function FishingMap({
             ctx.fillRect(
               containerPoint.x - pixelExpansion / 2,
               containerPoint.y - pixelExpansion / 2,
-              pixelExpansion + 2.0, // Overlap margin blends boundaries cleanly under canvas blur context
+              pixelExpansion + 2.0, 
               pixelExpansion + 2.0
             );
           }
@@ -305,7 +304,7 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, [sstMatrix]);
 
-  // 6. ISOLATED REACT-DRIVEN LAYER SYNC EFFECT (STRICT NO-LOOP ISOLATION ARCHITECTURE)
+  // 6. ISOLATED REACT-DRIVEN LAYER SYNC EFFECT
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -325,7 +324,7 @@ export default function FishingMap({
         if (!map.hasLayer(canvasLayerRef.current)) {
           map.addLayer(canvasLayerRef.current);
         } else {
-          canvasLayerRef.current._render(); // Smooth repaint without re-triggering map event flags
+          canvasLayerRef.current._render(); 
         }
       } else {
         if (map.hasLayer(canvasLayerRef.current)) map.removeLayer(canvasLayerRef.current);
@@ -366,4 +365,13 @@ export default function FishingMap({
 
       const label = L.marker([h.lat, h.lng], {
         pane: "labelPane",
-        interactive:
+        interactive: false,
+        icon: L.divIcon({ className: "", html: `<div style="display:flex;align-items:center;gap:3px;white-space:nowrap;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color}"></span><span style="color:#fff;font-size:10px;font-weight:600;text-shadow:0 0 3px #000">${h.distanceLabel} • ${(h.sstTemp + sstOffset).toFixed(1)}°</span></div>`, iconAnchor: [60, -10] })
+      });
+      label.addTo(map);
+      labelMarkersRef.current.set(h.id, label);
+    });
+  }, [liveHotspots, showHotspots, sstOffset]);
+
+  return <div ref={containerRef} className={`w-full h-full ${className}`} />;
+}
