@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Vector Grid Mapping Engine - Fluid Telemetry Interpolation Edition
+// High-Fidelity Vector Grid Mapping Engine - Mobile Fallback Resiliency Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -67,13 +67,56 @@ export default function FishingMap({
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  // 1. FETCH SATELLITE MATRIX WITH RE-CALIBRATED ENVIRONMENTAL SECTOR ENGINE
+  // GENERATE LOCAL OFFSHORE ARCHITECTURAL WATER COLUMN
+  const compileLocalBackupMatrix = () => {
+    const contouredGrid: GridCell[] = [];
+    const resolutionStep = 0.04; 
+
+    for (let lat = 34.5; lat <= 41.0; lat += resolutionStep) {
+      let baseCoastLng = -75.5;
+      if (lat < 35.2) {
+        baseCoastLng = -75.47 - (35.2 - lat) * 0.8; 
+      } else if (lat >= 35.2 && lat < 38.5) {
+        baseCoastLng = -75.52 + (lat - 35.2) * 0.44 + Math.sin((lat - 35.2) * 1.4) * 0.18; 
+      } else {
+        baseCoastLng = -74.85 + (lat - 38.5) * 0.22 - Math.cos((lat - 38.5) * 1.9) * 0.12; 
+      }
+
+      for (let lng = -76.5; lng <= -70.0; lng += resolutionStep) {
+        if (lng < baseCoastLng - 0.03) continue; 
+
+        const shelfDistance = lng - baseCoastLng;
+        const shelfSlope = (lat - 38.3) * 1.5 + (lng + 74.2) * 2.8;
+        const fluidWaves = Math.sin(lat * 5.5 + lng * 3.5) * 1.4 + Math.cos(lng * 7.5 - lat * 2.5) * 1.1;
+        
+        let calcSst = 63.5 + (shelfDistance * 6.4) - (shelfSlope * 0.4) + fluidWaves;
+        calcSst = Math.max(58.0, Math.min(83.5, calcSst));
+
+        contouredGrid.push({
+          lat: parseFloat(lat.toFixed(4)),
+          lng: parseFloat(lng.toFixed(4)),
+          sst: parseFloat(calcSst.toFixed(2))
+        });
+      }
+    }
+    return contouredGrid;
+  };
+
+  // 1. FETCH SATELLITE MATRIX WITH FAST-FAIL TIMEOUT SAFETY ANCHOR
   useEffect(() => {
+    let activeScope = true;
+    
     async function loadMatrixData() {
+      // Create an internal abort clock to break network hangs within 2.5 seconds
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+
       try {
-        const res = await fetch("/.netlify/functions/get-sst-matrix");
+        const res = await fetch("/.netlify/functions/get-sst-matrix", { signal: controller.signal });
+        clearTimeout(timeoutId);
+        
         const json = await res.json();
-        if (json.success && json.matrix && json.matrix.length > 0) {
+        if (activeScope && json.success && json.matrix && json.matrix.length > 0) {
           const formatted: GridCell[] = json.matrix.map((row: any) => ({
             lat: parseFloat(row.lat),
             lng: parseFloat(row.lng),
@@ -83,45 +126,22 @@ export default function FishingMap({
           return;
         }
       } catch (err) {
-        // High-fidelity fallback matrix triggers smoothly if db handshake is adapting
+        console.warn("Mobile edge network timeout or cache hang, shifting to secure local marine matrix layer:", err);
+      } finally {
+        clearTimeout(timeoutId);
       }
 
-      const contouredGrid: GridCell[] = [];
-      const resolutionStep = 0.04; 
-
-      for (let lat = 34.5; lat <= 41.0; lat += resolutionStep) {
-        let baseCoastLng = -75.5;
-        if (lat < 35.2) {
-          baseCoastLng = -75.47 - (35.2 - lat) * 0.8; 
-        } else if (lat >= 35.2 && lat < 38.5) {
-          baseCoastLng = -75.52 + (lat - 35.2) * 0.44 + Math.sin((lat - 35.2) * 1.4) * 0.18; 
-        } else {
-          baseCoastLng = -74.85 + (lat - 38.5) * 0.22 - Math.cos((lat - 38.5) * 1.9) * 0.12; 
-        }
-
-        for (let lng = -76.5; lng <= -70.0; lng += resolutionStep) {
-          if (lng < baseCoastLng - 0.03) continue; 
-
-          const shelfDistance = lng - baseCoastLng;
-          const shelfSlope = (lat - 38.3) * 1.5 + (lng + 74.2) * 2.8;
-          const fluidWaves = Math.sin(lat * 5.5 + lng * 3.5) * 1.4 + Math.cos(lng * 7.5 - lat * 2.5) * 1.1;
-          
-          let calcSst = 63.5 + (shelfDistance * 6.4) - (shelfSlope * 0.4) + fluidWaves;
-          calcSst = Math.max(58.0, Math.min(83.5, calcSst));
-
-          contouredGrid.push({
-            lat: parseFloat(lat.toFixed(4)),
-            lng: parseFloat(lng.toFixed(4)),
-            sst: parseFloat(calcSst.toFixed(2))
-          });
-        }
+      // Safe fallback deployment breaks the infinite fetch screen instantly
+      if (activeScope) {
+        setSstMatrix(compileLocalBackupMatrix());
       }
-      setSstMatrix(contouredGrid);
     }
+    
     loadMatrixData();
+    return () => { activeScope = false; };
   }, []);
 
-  // 2. RESILIENT NEAREST-NEIGHBOR TELEMETRY SNAP-ENGINE
+  // 2. PROXIMITY MAGNET MATCHING LOGIC
   function findClosestSst(lat: number, lng: number): number | null {
     if (!sstMatrix || sstMatrix.length === 0) return null;
     let closestCell = null;
@@ -134,8 +154,6 @@ export default function FishingMap({
         closestCell = cell;
       }
     }
-    
-    // Expanded 0.15 threshold locks taps directly onto adjacent water channels flawlessly
     if (closestCell && minDistance < 0.15) {
       return closestCell.sst;
     }
@@ -145,11 +163,11 @@ export default function FishingMap({
   // 3. COLOR SPECTRUM CHROMATIC DRIVERS
   function getSstColor(temp: number): string {
     const adjusted = temp + sstOffset;
-    if (adjusted >= 75.0) return "#b91c1c";   // Gulf Core (Deep Red)
-    if (adjusted >= 71.5) return "#ea580c";   // Warm Margin Break (Orange)
-    if (adjusted >= 68.5) return "#ca8a04";   // Concentrated Thermal Seam (Yellow)
-    if (adjusted >= 65.0) return "#16a34a";   // Transition Water (Green)
-    return "#2563eb";                         // Basin Cold Water (Blue)
+    if (adjusted >= 75.0) return "#b91c1c";   
+    if (adjusted >= 71.5) return "#ea580c";   
+    if (adjusted >= 68.5) return "#ca8a04";   
+    if (adjusted >= 65.0) return "#16a34a";   
+    return "#2563eb";                         
   }
 
   // 4. GENERATE APP STRIKE ZONES ONCE DATA IS FULLY RESOLVED
@@ -214,7 +232,7 @@ export default function FishingMap({
       bathyOverlayLayerRef.current.addTo(map);
     }
 
-    // CLICK HANDLER: REAL-TIME TELEMETRY HOVER SYSTEM
+    // CLICK HANDLER: REAL-TIME TELEMETRY POPUPS
     map.on("click", (e: L.LeafletMouseEvent) => {
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
@@ -266,14 +284,12 @@ export default function FishingMap({
     const bounds: L.LatLngBoundsExpression = [[34.5, -76.5], [41.0, -70.0]];
 
     const canvas = document.createElement("canvas");
-    canvas.width = 240;   // Increased resolution canvas locks down high-accuracy node distribution
+    canvas.width = 240;   
     canvas.height = 260;
     const ctx = canvas.getContext("2d");
     
     if (ctx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      
-      // Secondary soft edge pass blends the background layout fields seamlessly
       ctx.filter = "blur(3px)"; 
 
       sstMatrix.forEach((cell) => {
@@ -284,12 +300,11 @@ export default function FishingMap({
         const y = pctY * canvas.height;
         const color = getSstColor(cell.sst);
 
-        // RADIAL GRADIENT PLOTTING - Completely dissolves sharp centers and rings
         const nodeRadius = 8;
         const gradient = ctx.createRadialGradient(x, y, 0, x, y, nodeRadius);
-        gradient.addColorStop(0, color);                         // Solid temperature core
-        gradient.addColorStop(0.3, color + "dd");                   // Micro-feathering drop off
-        gradient.addColorStop(1, "rgba(0, 0, 0, 0)");             // Absolute transparent outer seam
+        gradient.addColorStop(0, color);                         
+        gradient.addColorStop(0.3, color + "dd");                   
+        gradient.addColorStop(1, "rgba(0, 0, 0, 0)");             
 
         ctx.fillStyle = gradient;
         ctx.beginPath();
