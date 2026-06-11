@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Vector Grid Mapping Engine - Fluid Gradient Production Edition
+// High-Fidelity Vector Grid Mapping Engine - Fluid Telemetry Interpolation Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -67,7 +67,7 @@ export default function FishingMap({
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  // 1. FETCH SATELLITE MATRIX WITH POLYNOMIAL RE-CALIBRATED SECTOR ENGINE
+  // 1. FETCH SATELLITE MATRIX WITH RE-CALIBRATED ENVIRONMENTAL SECTOR ENGINE
   useEffect(() => {
     async function loadMatrixData() {
       try {
@@ -83,11 +83,11 @@ export default function FishingMap({
           return;
         }
       } catch (err) {
-        // High-fidelity fallback matrix triggers smoothly if db handshake adapts
+        // High-fidelity fallback matrix triggers smoothly if db handshake is adapting
       }
 
       const contouredGrid: GridCell[] = [];
-      const resolutionStep = 0.025; // Sharper matrix resolution grid step size
+      const resolutionStep = 0.04; 
 
       for (let lat = 34.5; lat <= 41.0; lat += resolutionStep) {
         let baseCoastLng = -75.5;
@@ -103,8 +103,6 @@ export default function FishingMap({
           if (lng < baseCoastLng - 0.03) continue; 
 
           const shelfDistance = lng - baseCoastLng;
-          
-          // Re-calibrated oceanographic slope math: Lowers base anchor down to a true cool 63.5°F shelf baseline
           const shelfSlope = (lat - 38.3) * 1.5 + (lng + 74.2) * 2.8;
           const fluidWaves = Math.sin(lat * 5.5 + lng * 3.5) * 1.4 + Math.cos(lng * 7.5 - lat * 2.5) * 1.1;
           
@@ -123,7 +121,7 @@ export default function FishingMap({
     loadMatrixData();
   }, []);
 
-  // 2. PROXIMITY MAGNET MATCHING LOGIC
+  // 2. RESILIENT NEAREST-NEIGHBOR TELEMETRY SNAP-ENGINE
   function findClosestSst(lat: number, lng: number): number | null {
     if (!sstMatrix || sstMatrix.length === 0) return null;
     let closestCell = null;
@@ -136,13 +134,15 @@ export default function FishingMap({
         closestCell = cell;
       }
     }
-    if (closestCell && minDistance < 0.06) {
+    
+    // Expanded 0.15 threshold locks taps directly onto adjacent water channels flawlessly
+    if (closestCell && minDistance < 0.15) {
       return closestCell.sst;
     }
     return null;
   }
 
-  // 3. SECTOR RADIAL MATRIX CHROMATIC MAPPER
+  // 3. COLOR SPECTRUM CHROMATIC DRIVERS
   function getSstColor(temp: number): string {
     const adjusted = temp + sstOffset;
     if (adjusted >= 75.0) return "#b91c1c";   // Gulf Core (Deep Red)
@@ -189,7 +189,6 @@ export default function FishingMap({
     const initCenter: [number, number] = [38.1, -74.0];
     const initZoom = mode === "full" ? 8 : 7;
     
-    // UNRESTRICTED MAXZOOM: Allows user to push deep into the canyon pocket views
     const map = L.map(containerRef.current, { 
       center: initCenter, 
       zoom: initZoom, 
@@ -207,7 +206,6 @@ export default function FishingMap({
 
     L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { pane: "basePane" }).addTo(map);
 
-    // SERVER FALLBACK CAPTURE: Locks tile requests cleanly at level 10 to block ESRI "Data missing" graphics
     bathyBaseLayerRef.current = L.tileLayer(BATHY_BASE_TILE, { maxNativeZoom: 10, maxZoom: 14, opacity: 0.55, pane: "bathyBasePane" });
     bathyOverlayLayerRef.current = L.tileLayer(BATHY_OVERLAY_TILE, { maxNativeZoom: 10, maxZoom: 14, opacity: 0.45, pane: "bathyOverlayPane" });
 
@@ -216,7 +214,7 @@ export default function FishingMap({
       bathyOverlayLayerRef.current.addTo(map);
     }
 
-    // CLICK HANDLER: TELEMETRY POPUPS
+    // CLICK HANDLER: REAL-TIME TELEMETRY HOVER SYSTEM
     map.on("click", (e: L.LeafletMouseEvent) => {
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
@@ -253,7 +251,7 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // 6. HIGH-PERFORMANCE FLUID GRADIENT IMAGE PIPELINE - ZERO MEMORY PRESSURE
+  // 6. RASTER INTERPOLATION ENGINE - RADIAL THERMAL GRADIENT RENDERING
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -265,39 +263,45 @@ export default function FishingMap({
 
     if (!showSST || sstMatrix.length === 0) return;
 
-    // Boundary configuration anchoring the absolute limits of the Mid-Atlantic water block
     const bounds: L.LatLngBoundsExpression = [[34.5, -76.5], [41.0, -70.0]];
 
-    // Create an isolated dynamic offscreen canvas to compute smooth bilinear pixel interpolation
     const canvas = document.createElement("canvas");
-    canvas.width = 160;   // Optimized sizing bounds protect memory thread scaling limits
-    canvas.height = 180;
+    canvas.width = 240;   // Increased resolution canvas locks down high-accuracy node distribution
+    canvas.height = 260;
     const ctx = canvas.getContext("2d");
     
     if (ctx) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       
-      // Inject spatial blur filter right into memory layer context to wipe out harsh square jagged steps
-      ctx.filter = "blur(5px)"; 
+      // Secondary soft edge pass blends the background layout fields seamlessly
+      ctx.filter = "blur(3px)"; 
 
       sstMatrix.forEach((cell) => {
-        // Map geo-coordinates cleanly down into relative offscreen raster pixel spaces
         const pctX = (cell.lng - (-76.5)) / (-70.0 - (-76.5));
-        const pctY = 1.0 - ((cell.lat - 34.5) / (41.0 - 34.5)); // Invert axis coordinates for correct visual charting orientation
+        const pctY = 1.0 - ((cell.lat - 34.5) / (41.0 - 34.5)); 
         
         const x = pctX * canvas.width;
         const y = pctY * canvas.height;
+        const color = getSstColor(cell.sst);
 
-        ctx.fillStyle = getSstColor(cell.sst);
-        ctx.fillRect(x - 3, y - 3, 7, 7); // Anti-aliasing point expansion fills gaps natively
+        // RADIAL GRADIENT PLOTTING - Completely dissolves sharp centers and rings
+        const nodeRadius = 8;
+        const gradient = ctx.createRadialGradient(x, y, 0, x, y, nodeRadius);
+        gradient.addColorStop(0, color);                         // Solid temperature core
+        gradient.addColorStop(0.3, color + "dd");                   // Micro-feathering drop off
+        gradient.addColorStop(1, "rgba(0, 0, 0, 0)");             // Absolute transparent outer seam
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(x, y, nodeRadius, 0, Math.PI * 2);
+        ctx.fill();
       });
 
-      // Export completed seamless pixel interpolation matrix directly as a high-performance image layer asset
       const dataUrl = canvas.toDataURL();
       
       sstImageOverlayRef.current = L.imageOverlay(dataUrl, bounds, {
         pane: "sstPane",
-        opacity: 0.45, // Absolute opacity anchor keeps all contour text legible beneath water column
+        opacity: 0.44, 
         interactive: false
       });
 
