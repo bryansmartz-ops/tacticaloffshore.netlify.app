@@ -1,20 +1,10 @@
-// netlify/functions/get-sst-matrix.js
-// High-Fidelity Server-Side Marine Data Matrix Engine - Weather Injected Edition
+// netlify/functions/get-sst-matrix.ts
+// High-Fidelity Server-Side Marine Data Matrix Engine - Weather Injected TypeScript Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
-const sstCanyons = [
-  { name: "Hudson", lat: 39.52, lng: -72.05 },
-  { name: "Toms", lat: 39.15, lng: -72.95 },
-  { name: "Spencer", lat: 39.05, lng: -72.7 },
-  { name: "Lindenkohl", lat: 38.95, lng: -72.85 },
-  { name: "Wilmington", lat: 38.52, lng: -73.42 },
-  { name: "Baltimore", lat: 38.22, lng: -73.82 },
-  { name: "Poorman's", lat: 37.88, lng: -74.12 },
-  { name: "Washington", lat: 37.55, lng: -74.35 },
-  { name: "Norfolk", lat: 37.05, lng: -74.65 }
-];
+import { Handler } from "@netlify/functions";
 
-exports.handler = async function (event, context) {
+export const handler: Handler = async (event, context) => {
   let liveWeatherPayload = {
     waveHeight: "2.8",
     period: "8",
@@ -23,7 +13,7 @@ exports.handler = async function (event, context) {
     source: "NOAA SERVER GRID"
   };
 
-  // Server-to-Server Met Fetch: Bypasses mobile PWA security walls completely
+  // Server-to-Server Weather Parse: Completely invisible to browser CORS firewalls
   try {
     const weatherUrl = "https://api.open-meteo.com/v1/marine?latitude=38.46&longitude=-74.70&current=wave_height,wave_period,wave_direction&length_unit=ft";
     const weatherRes = await fetch(weatherUrl, { headers: { 'Accept': 'application/json' } });
@@ -53,7 +43,7 @@ exports.handler = async function (event, context) {
   }
 
   // Generate Core Marine Layout Grids
-  const matrixData = [];
+  const matrixData: any[] = [];
   const resolutionStep = 0.04;
 
   for (let lat = 34.5; lat <= 41.0; lat += resolutionStep) {
@@ -93,7 +83,7 @@ exports.handler = async function (event, context) {
     body: JSON.stringify({
       success: true,
       matrix: matrixData,
-      liveWeather: liveWeatherPayload // Injected clean payload delivery anchor
+      liveWeather: liveWeatherPayload
     })
   };
 };
