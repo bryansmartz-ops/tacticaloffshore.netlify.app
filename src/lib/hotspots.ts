@@ -90,14 +90,18 @@ export const EMPTY_SIGNALS: HotspotSignals = {
 
 export function speciesFromSST(tempF: number): string[] {
   const list: string[] = [];
-  if (tempF >= 60 && tempF <= 68) list.push("Bluefin Tuna");
-  if (tempF >= 65 && tempF <= 75) list.push("Bigeye Tuna");
-  if (tempF >= 70 && tempF <= 80) list.push("Yellowfin Tuna");
-  if (tempF >= 70) list.push("White Marlin");
-  if (tempF >= 74) list.push("Wahoo");
-  if (tempF >= 78) list.push("Mahi Mahi");
-  if (tempF < 65) list.push("Swordfish");
-  return list.slice(0, 3);
+  
+  // High-value targeted pelagic species thermal gate brackets
+  if (tempF >= 60 && tempF <= 70) list.push("Bluefin Tuna");
+  if (tempF >= 64 && tempF <= 76) list.push("Bigeye Tuna");
+  if (tempF >= 67 && tempF <= 82) list.push("Yellowfin Tuna");
+  if (tempF >= 69 && tempF <= 79) list.push("White Marlin");
+  if (tempF >= 72 && tempF <= 84) list.push("Wahoo");
+  if (tempF >= 74) list.push("Mahi Mahi");
+  if (tempF >= 58 && tempF <= 72) list.push("Swordfish");
+  
+  // Unrestricted return ensures all matched target species render on the card layout
+  return list; 
 }
 
 export function computeSSTSignals(
@@ -376,14 +380,14 @@ export const HOTSPOT_DEFS: HotspotDef[] = [
     id: "2",
     title: "Poorman's Canyon",
     fallbackSstF: 73.8,
-    lat: 37.88, // Geographically anchored north/northeast of Washington Canyon
+    lat: 37.88, 
     lng: -74.12,
     ambientLat: 37.88,
     ambientLng: -75.10,
     searchBbox: { minLat: 37.6, maxLat: 38.2, minLng: -74.9, maxLng: -73.8 },
     minConfidence: 62,
     idealSstF: 72,
-    siteIdealBreakDeltaF: 4.5, // Prime meander corridor calibration
+    siteIdealBreakDeltaF: 4.5, 
     historyPrior: 9,
   },
   {
