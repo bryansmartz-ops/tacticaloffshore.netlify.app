@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   CheckCircle2,
+  Database,
 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
@@ -57,22 +58,40 @@ export default function AdminPanel() {
   const [filter, setFilter] = useState<"all" | "unused" | "used">("all");
   const [processing, setProcessing] = useState(false);
 
-  // ── Fetch Codes From Supabase KV Store ───────────────────────────────────
+  // Raw Database Inspector State
+  const [rawRows, setRawRows] = useState<any[]>([]);
+
+  // ── Run Structural Probe on the Key/Value Table ────────────────────────
+  async function inspectDatabaseStructure() {
+    try {
+      const { data, error: sbError } = await supabase
+        .from(KV_TABLE)
+        .select("key, value")
+        .limit(15);
+
+      if (!sbError && data) {
+        setRawRows(data);
+      }
+    } catch (err) {
+      console.error("Database structure inspection failed:", err);
+    }
+  }
+
   async function fetchCodes() {
     setLoading(true);
     setError(null);
     try {
-      // Pulling all keys that represent activation codes from the text/jsonb matrix
+      await inspectDatabaseStructure();
+
       const { data, error: sbError } = await supabase
         .from(KV_TABLE)
         .select("value")
-        .like("key", "code:%");
+        .like("key", "%code:%");
 
       if (sbError) throw sbError;
 
       if (data) {
         const parsedCodes = data.map((row: any) => row.value as ActivationCodePayload);
-        // Sort descending by creation date
         parsedCodes.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         setCodes(parsedCodes);
       }
@@ -90,7 +109,6 @@ export default function AdminPanel() {
     }
   }, [authed]);
 
-  // ── Generate Code Payloads ───────────────────────────────────────────────
   async function handleGenerate() {
     setProcessing(true);
     try {
@@ -124,14 +142,14 @@ export default function AdminPanel() {
     }
   }
 
-  // ── Delete Code Payloads ─────────────────────────────────────────────────
   async function handleDelete(codeStr: string) {
     setProcessing(true);
     try {
+      // Dynamic fallback delete targeting loose keys or prefixed keys cleanly
       const { error: sbError } = await supabase
         .from(KV_TABLE)
         .delete()
-        .eq("key", `code:${codeStr}`);
+        .or(`key.eq.code:${codeStr},key.eq.${codeStr}`);
 
       if (sbError) throw sbError;
       await fetchCodes();
@@ -165,7 +183,6 @@ export default function AdminPanel() {
   const unusedCount = codes.filter((c) => !c.firstUsed).length;
   const usedCount = codes.filter((c) => c.firstUsed).length;
 
-  // ── Auth Gate View ────────────────────────────────────────────────────────
   if (!authed) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6">
@@ -232,7 +249,7 @@ export default function AdminPanel() {
           </div>
           <div>
             <h1 className="text-xl font-bold">Admin Console</h1>
-            <p className="text-xs text-slate-400">Supabase KV Store Integration Active</p>
+            <p className="text-xs text-slate-400">Database Debug Mode Active</p>
           </div>
         </div>
         <button
@@ -243,17 +260,39 @@ export default function AdminPanel() {
         </button>
       </div>
 
-      {/* Error Output Banner */}
       {error && (
         <div className="bg-red-950/40 border border-red-900 text-red-400 text-xs rounded-xl p-3 mb-4">
           {error}
         </div>
       )}
 
+      {/* ── LIVE DATABASE LAYOUT INSPECTOR PANEL ─────────────────────────────────── */}
+      <section className="bg-slate-950 border border-slate-800 rounded-xl p-4 mb-6 space-y-3">
+        <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
+          <Database className="w-4 h-4" />
+          Live Table Schema Inspector (First 15 Rows)
+        </div>
+        <p className="text-[11px] text-slate-400 leading-normal">
+          This panel displays exactly what keys exist inside your <code className="text-cyan-400 font-mono">kv_store_8db09b0a</code> table to verify structural mappings.
+        </p>
+        <div className="bg-slate-900 rounded-lg p-2.5 border border-slate-800 max-h-48 overflow-y-auto font-mono text-[10px] text-slate-300 space-y-1 scrollbar-none">
+          {rawRows.length === 0 ? (
+            <span className="text-slate-600 italic">Table is currently empty or unreadable.</span>
+          ) : (
+            rawRows.map((row, idx) => (
+              <div key={idx} className="border-b border-slate-850 pb-1 last:border-0">
+                <span className="text-cyan-400 font-bold">Key:</span> "{row.key}" ➔ 
+                <span className="text-slate-500 ml-1">Value Sample:</span> {JSON.stringify(row.value).substring(0, 75)}...
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+
       {/* Stats Cards */}
       <div className="grid grid-cols-3 gap-3 mb-6">
         {[
-          { label: "Total", value: codes.length, color: "text-white" },
+          { label: "Total Match", value: codes.length, color: "text-white" },
           { label: "Unused", value: unusedCount, color: "text-emerald-400" },
           { label: "Used", value: usedCount, color: "text-amber-400" },
         ].map((s) => (
@@ -305,7 +344,7 @@ export default function AdminPanel() {
         </button>
       </div>
 
-      {/* Filters + Action controls */}
+      {/* Filters */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex gap-1 bg-slate-800 rounded-lg p-1 border border-slate-700">
           {(["all", "unused", "used"] as const).map((f) => (
@@ -333,12 +372,12 @@ export default function AdminPanel() {
         )}
       </div>
 
-      {/* Code Table Manifest */}
+      {/* Code Manifest Table */}
       <div className="space-y-2">
         {loading && <div className="text-slate-400 text-sm text-center py-10">Syncing with database matrix…</div>}
         
         {!loading && filtered.length === 0 && (
-          <div className="text-center text-slate-500 py-10 text-sm">No activation metrics matches found.</div>
+          <div className="text-center text-slate-500 py-10 text-sm">No formatted activation keys match the search parameters.</div>
         )}
 
         {!loading && filtered.map((c) => (
