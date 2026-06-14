@@ -58,10 +58,10 @@ export default function AdminPanel() {
   const [filter, setFilter] = useState<"all" | "unused" | "used">("all");
   const [processing, setProcessing] = useState(false);
 
-  // Raw Database Inspector State
+  // Raw DB rows back-office log
   const [rawRows, setRawRows] = useState<any[]>([]);
 
-  // ── Run Structural Probe on the Key/Value Table ────────────────────────
+  // ── Database Table Structure Diagnostics ──────────────────────────────────
   async function inspectDatabaseStructure() {
     try {
       const { data, error: sbError } = await supabase
@@ -77,6 +77,7 @@ export default function AdminPanel() {
     }
   }
 
+  // ── Sync Activation Keys From Supabase ───────────────────────────────────
   async function fetchCodes() {
     setLoading(true);
     setError(null);
@@ -109,11 +110,15 @@ export default function AdminPanel() {
     }
   }, [authed]);
 
+  // ── Commit Keys with Structural Rule Targets ─────────────────────────────
   async function handleGenerate() {
     setProcessing(true);
+    setError(null);
     try {
       for (let i = 0; i < qty; i++) {
         const newCodeStr = generateCode();
+        
+        // Exact structural dictionary object mirroring your active platform properties
         const newPayload: ActivationCodePayload = {
           code: newCodeStr,
           deviceId: null,
@@ -142,10 +147,11 @@ export default function AdminPanel() {
     }
   }
 
+  // ── Dynamic Row Deletion Purge ──────────────────────────────────────────
   async function handleDelete(codeStr: string) {
     setProcessing(true);
+    setError(null);
     try {
-      // Dynamic fallback delete targeting loose keys or prefixed keys cleanly
       const { error: sbError } = await supabase
         .from(KV_TABLE)
         .delete()
@@ -249,7 +255,7 @@ export default function AdminPanel() {
           </div>
           <div>
             <h1 className="text-xl font-bold">Admin Console</h1>
-            <p className="text-xs text-slate-400">Database Debug Mode Active</p>
+            <p className="text-xs text-slate-400">Database Engine Fully Restored</p>
           </div>
         </div>
         <button
@@ -266,7 +272,7 @@ export default function AdminPanel() {
         </div>
       )}
 
-      {/* ── LIVE DATABASE LAYOUT INSPECTOR PANEL ─────────────────────────────────── */}
+      {/* Live Table Schema Inspector Panel */}
       <section className="bg-slate-950 border border-slate-800 rounded-xl p-4 mb-6 space-y-3">
         <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
           <Database className="w-4 h-4" />
@@ -315,7 +321,7 @@ export default function AdminPanel() {
             <label className="text-xs text-slate-400 mb-1 block">User Name / Note</label>
             <input
               type="text"
-              placeholder="e.g. Captain John Doe"
+              placeholder="e.g. Captain Bryan Martz"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none"
@@ -344,7 +350,7 @@ export default function AdminPanel() {
         </button>
       </div>
 
-      {/* Filters */}
+      {/* Filters + Action controls */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex gap-1 bg-slate-800 rounded-lg p-1 border border-slate-700">
           {(["all", "unused", "used"] as const).map((f) => (
@@ -372,7 +378,7 @@ export default function AdminPanel() {
         )}
       </div>
 
-      {/* Code Manifest Table */}
+      {/* Code Table Manifest */}
       <div className="space-y-2">
         {loading && <div className="text-slate-400 text-sm text-center py-10">Syncing with database matrix…</div>}
         
