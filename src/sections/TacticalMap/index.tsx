@@ -13,10 +13,21 @@ import {
 import FishingMap from "../../components/FishingMap";
 import { gibsSSTDate, gibsSSTLabel } from "../../lib/erddap";
 import { HOTSPOTS_IN_RANGE, HOTSPOT_DEFS } from "../../lib/hotspots";
-import { useQuery, useMutation } from "@animaapp/playground-react-sdk";
-import type { Waypoint } from "@animaapp/playground-react-sdk";
+import { supabase } from "../../lib/supabase";
 
 const SST_HISTORY_OFFSETS = [0, 1, 2, 3];
+const KV_TABLE = "kv_store_8db09b0a";
+
+export interface Waypoint {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  tdW: string;
+  tdY: string; // Adjusted safely to mirror underlying object models natively
+  tdX: string;
+  savedAt: string;
+}
 
 const activeHotspotDefs =
   HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS;
@@ -29,39 +40,87 @@ export default function TacticalMap() {
   const [isAnimating, setIsAnimating] = useState(false);
   const animIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [showWaypoints, setShowWaypoints] = useState(false);
-  const [flyTo, setFlyTo] = useState<
-    { lat: number; lng: number; zoom?: number } | undefined
-  >();
+  const [flyTo, setFlyTo] = useState<{ lat: number; lng: number; zoom?: number } | undefined>();
 
-  const { data: waypointsData } = useQuery("Waypoint", {
-    orderBy: { savedAt: "desc" },
-  });
-  const {
-    create: createWaypoint,
-    remove: removeWaypoint,
-    isPending: wpMutating,
-  } = useMutation("Waypoint");
+  const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
+  const [wpMutating, setWpMutating] = useState(false);
 
-  const waypoints: Waypoint[] = waypointsData ?? [];
+  // ── Sync Waypoint Vectors Natively from Supabase ─────────────────────────
+  const fetchWaypoints = async () => {
+    try {
+      const { data, error } = await supabase
+        .from(KV_TABLE)
+        .select("value")
+        .like("key", "waypoint:%");
 
+      if (error) throw error;
+
+      if (data) {
+        const parsedWps = data.map((row: any) => row.value as Waypoint);
+        // Sort newest saved entries to the top
+        parsedWps.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
+        setWaypoints(parsedWps);
+      }
+    } catch (err) {
+      console.error("[Waypoint Synchronization Failure]:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchWaypoints();
+  }, []);
+
+  // ── Save Waypoints ───────────────────────────────────────────────────────
   const handleSaveWaypoint = useCallback(
-    async (
-      name: string,
-      lat: number,
-      lng: number,
-      tdW: string,
-      tdX: string,
-    ) => {
-      await createWaypoint({ name, lat, lng, tdW, tdX, savedAt: new Date() });
+    async (name: string, lat: number, lng: number, tdW: string, tdX: string) => {
+      setWpMutating(true);
+      try {
+        const id = Math.random().toString(36).substring(2, 9).toUpperCase();
+        const newWp: Waypoint = {
+          id,
+          name: name.trim() || `Mark-${id}`,
+          lat,
+          lng,
+          tdW,
+          tdY: "", 
+          tdX,
+          savedAt: new Date().toISOString(),
+        };
+
+        const { error } = await supabase
+          .from(KV_TABLE)
+          .insert([{ key: `waypoint:${id}`, value: newWp }]);
+
+        if (error) throw error;
+        await fetchWaypoints();
+      } catch (err) {
+        console.error("[Waypoint Persistence Failed]:", err);
+      } finally {
+        setWpMutating(false);
+      }
     },
-    [createWaypoint],
+    []
   );
 
+  // ── Delete Waypoints ─────────────────────────────────────────────────────
   const deleteWaypoint = useCallback(
     async (id: string) => {
-      await removeWaypoint(id);
+      setWpMutating(true);
+      try {
+        const { error } = await supabase
+          .from(KV_TABLE)
+          .delete()
+          .eq("key", `waypoint:${id}`);
+
+        if (error) throw error;
+        await fetchWaypoints();
+      } catch (err) {
+        console.error("[Waypoint Deletion Failed]:", err);
+      } finally {
+        setWpMutating(false);
+      }
     },
-    [removeWaypoint],
+    []
   );
 
   // Animation loop
@@ -105,8 +164,7 @@ export default function TacticalMap() {
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1200] w-[min(340px,calc(100vw-24px))] bg-slate-900/97 border border-cyan-700 rounded-xl shadow-2xl flex flex-col max-h-[70vh]">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
             <span className="text-sm font-bold text-cyan-400 flex items-center gap-1.5">
-              <BookmarkCheck className="w-4 h-4" /> Saved Waypoints (
-              {waypoints.length})
+              <BookmarkCheck className="w-4 h-4" /> Saved Waypoints ({waypoints.length})
             </span>
             <button
               onClick={() => setShowWaypoints(false)}
@@ -215,7 +273,7 @@ export default function TacticalMap() {
           className={`p-2 rounded-lg border transition-all ${showSST ? "bg-orange-500 border-orange-400 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}
           title="Toggle SST overlay"
         >
-          <Thermometer className="w-5 h-5" />
+          <Themeometer className="w-5 h-5" />
         </button>
         <button
           onClick={() => setShowBathy(!showBathy)}
