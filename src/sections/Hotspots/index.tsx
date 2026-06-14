@@ -24,8 +24,6 @@ import {
   speciesFromSST,
 } from "../../lib/hotspots";
 
-const SST_HISTORY_OFFSETS = [0, 1, 2, 3];
-
 // Isolated visual guard to prevent silent runtime style compilation failures
 function getLocalConfidenceColor(score: number): string {
   if (score >= 80) return "#34d399"; // emerald-400
@@ -46,10 +44,10 @@ export default function Hotspots() {
   const [sstOffset, setSstOffset] = useState<number>(0); 
   const [showControls, setShowControls] = useState(false);
 
-  // Live-resolved data frameworks
+  // Live-resolved data frameworks — Executed properly as functional hooks to prevent UI crashes
   const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
-  const [sstDate] = useState(gibsSSTDate);
-  const [cacheAge, setCacheAge] = useState<number | null>(getCacheAge);
+  const [sstDate] = useState<string>(() => gibsSSTDate(3));
+  const [cacheAge, setCacheAge] = useState<number | null>(() => getCacheAge());
   
   const [dynamicDefs, setDynamicDefs] = useState<any[]>(() => 
     HOTSPOTS_IN_RANGE.length > 0 ? [...HOTSPOTS_IN_RANGE] : [...HOTSPOT_DEFS]
