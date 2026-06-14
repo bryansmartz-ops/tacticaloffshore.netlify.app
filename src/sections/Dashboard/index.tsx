@@ -1,5 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
+// Import Supabase Client context (adjust path relative to your project infrastructure layout)
+import { supabase } from "../../supabaseClient"; 
 import {
   Map,
   Fish,
@@ -90,6 +92,7 @@ function getDashboardSolunar(): { rating: string; nextMajor: string; ratingColor
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
   const [solunar, setSolunar] = useState<{ rating: string; nextMajor: string; ratingColor: string } | null>(null);
   const [sstResult, setSSTResult] = useState<SSTResult | null>(null);
   const [conditions, setConditions] = useState<{ status: ConditionStatus; wind: number | null; wave: number | null; ts: string }>({ status: "loading", wind: null, wave: null, ts: "" });
@@ -99,7 +102,42 @@ export default function Dashboard() {
   // Age Tracking Metrics
   const [dataAgeHours, setDataAgeHours] = useState<number>(0);
 
+  // ─── SYSTEM AUTHENTICATION GUARD TIMELINE ──────────────────────────────────
   useEffect(() => {
+    let isMounted = true;
+
+    // Direct check of immediate active session persistence state
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error || !session) {
+        if (isMounted) {
+          console.warn("[Session Invalidated]: Rerouting target to terminal interface base.");
+          navigate("/login", { replace: true });
+        }
+        return;
+      }
+      
+      // Session validated, begin downstream telemetry synchronization safely
+      if (isMounted) {
+        setAuthLoading(false);
+        initializeDashboardData();
+      }
+    });
+
+    // Capture background state triggers (especially critical for mobile auth handshakes)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT" && isMounted) {
+        navigate("/login", { replace: true });
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
+  }, [navigate]);
+
+  // Downstream data execution layer isolated cleanly from initialization hook
+  const initializeDashboardData = () => {
     setSolunar(getDashboardSolunar());
 
     // Hit the hardened backend endpoint
@@ -112,7 +150,6 @@ export default function Dashboard() {
         const trueBrief = data?.brief || data;
         setBrief(trueBrief);
 
-        // Safe extraction of buoy variables natively processed by server function
         if (data?.buoyFallback && data.buoyFallback.ts !== "Offline") {
           const b = data.buoyFallback;
           let status: ConditionStatus = "GO";
@@ -123,7 +160,6 @@ export default function Dashboard() {
           setConditions({ status: "error", wind: null, wave: null, ts: "Buoy Unreachable" });
         }
 
-        // Calculate explicit age boundary constraints
         const updateTime = data?.meta?.updated_at || trueBrief?.forecast_date || new Date().toISOString();
         const hoursOld = (new Date().getTime() - new Date(updateTime).getTime()) / (1000 * 60 * 60);
         setDataAgeHours(hoursOld);
@@ -145,7 +181,18 @@ export default function Dashboard() {
         setBriefLoading(false);
         setConditions({ status: "error", wind: null, wave: null, ts: "Proxy Blocked" });
       });
-  }, []);
+  };
+
+  // Keep screen blank or show dark status skeleton while confirming cryptography keys
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <div className="text-xs text-slate-500 uppercase tracking-widest font-mono animate-pulse">
+          Validating Security Credentials...
+        </div>
+      </div>
+    );
+  }
 
   const quickLinks = [
     { to: "/map", icon: Map, label: "Tactical Map", desc: "SST, hotspots, LORAN", color: "from-cyan-500 to-blue-600" },
