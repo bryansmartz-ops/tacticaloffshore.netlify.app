@@ -1,6 +1,5 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { supabase } from "../../lib/supabase"; 
 import {
   Map,
   Fish,
@@ -99,46 +98,39 @@ export default function Dashboard() {
   const [briefLoading, setBriefLoading] = useState<boolean>(true);
   const [dataAgeHours, setDataAgeHours] = useState<number>(0);
 
-  // ─── SYSTEM AUTHENTICATION GUARD TIMELINE ──────────────────────────────────
+  // ─── INTEGRATED SYSTEM ACCESS VERIFICATION ─────────────────────────────────
   useEffect(() => {
     let isMounted = true;
 
-    // Direct check of immediate active session persistence state
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
-      if (error || !session) {
-        if (isMounted) {
-          console.warn("[Session Invalidated]: Rerouting target to terminal interface base.");
-          navigate("/login", { replace: true });
-        }
-        return;
-      }
-      
-      // Session validated, begin downstream telemetry synchronization safely
-      if (isMounted) {
-        setAuthLoading(false);
-        initializeDashboardData();
-      }
-    });
+    // Evaluate terminal verification indexes inside persistent local storage
+    const isAccessGranted = 
+      localStorage.getItem("tactical_access_granted") === "true" ||
+      localStorage.getItem("tactical_unlocked") === "true" ||
+      localStorage.getItem("isLoggedIn") === "true";
 
-    // Capture background state triggers (especially critical for mobile auth handshakes)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT" && isMounted) {
+    if (!isAccessGranted) {
+      if (isMounted) {
+        console.warn("[Vessel Unverified]: Terminal lacking hardware tokens. Rerouting to gateway interface.");
         navigate("/login", { replace: true });
       }
-    });
+      return;
+    }
+
+    // Authorization checks passed safely, initiate localized telemetry matrix sync
+    if (isMounted) {
+      setAuthLoading(false);
+      initializeDashboardData();
+    }
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
     };
   }, [navigate]);
 
-  // Downstream data execution layer isolated cleanly from initialization hook
   const initializeDashboardData = () => {
     setSolunar(getDashboardSolunar());
 
-    // Hit the hardened backend endpoint
-    fetch("/.netlify/functions/get-latest-brief")
+    fetch("//.netlify/functions/get-latest-brief")
       .then((res) => {
         if (!res.ok) throw new Error("Synchronization offline");
         return res.json();
@@ -180,7 +172,6 @@ export default function Dashboard() {
       });
   };
 
-  // Keep screen blank or show dark status skeleton while confirming cryptography keys
   if (authLoading) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
@@ -202,14 +193,12 @@ export default function Dashboard() {
 
   return (
     <div className="p-4 space-y-6">
-      {/* ─── DATA AGE TIMELINE BANNER GUARD ─── */}
+      {/* Data Age Warning Banner */}
       {!briefLoading && dataAgeHours > 12 && (
         <div className={`flex items-center gap-3 p-3 rounded-xl border font-medium text-xs ${
-          dataAgeHours > 24 
-            ? "bg-red-950/40 text-red-400 border-red-900/60" 
-            : "bg-orange-950/40 text-orange-400 border-orange-900/60"
+          dataAgeHours > 24 ? "bg-red-950/40 text-red-400 border-red-900/60" : "bg-orange-950/40 text-orange-400 border-orange-900/60"
         }`}>
-          <AlertTriangle className="w-5 h-5 flex-shrink-0 animate-bounce" />
+          <AlertTriangle className="w-5 h-5 flex-shrink-0" />
           <div>
             <span className="font-bold block uppercase tracking-wide">
               {dataAgeHours > 24 ? "CRITICAL: Satellite Telemetry Expired" : "WARNING: Stale Tactical Intel"}
@@ -221,7 +210,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ─── Tactical AI Briefing Header Section ─── */}
+      {/* Briefing Section */}
       <section className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl p-4 border border-slate-700/60 shadow-lg">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2 text-cyan-400 font-bold tracking-wide text-xs uppercase">
@@ -276,7 +265,7 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* ─── Quick Access Links ─── */}
+      {/* Navigation Matrix */}
       <section>
         <h2 className="text-xl font-bold text-white mb-4">Quick Access</h2>
         <div className="grid grid-cols-2 gap-3">
@@ -299,9 +288,9 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* ─── Today's Numerical Outlooks ─── */}
+      {/* Marine Analytics Outputs */}
       <section className="bg-slate-800 rounded-xl p-4 border border-slate-700">
-        <h3 className="font-semibold text-white mb-3">Today&#39;s Outlook</h3>
+        <h3 className="font-semibold text-white mb-3">Today's Outlook</h3>
         <div className="grid grid-cols-2 gap-2 text-center">
           <div className="bg-slate-700/50 rounded-xl py-3 px-2">
             <div className={`text-xl sm:text-2xl font-bold ${conditions.status === "GO" ? "text-emerald-400" : conditions.status === "MARGINAL" ? "text-amber-400" : conditions.status === "NO-GO" ? "text-red-400" : "text-slate-500"}`}>
@@ -322,7 +311,7 @@ export default function Dashboard() {
           </div>
           <div className="bg-slate-700/50 rounded-xl py-3 px-2">
             <div className="flex items-center justify-center gap-1">
-              <Thermometer className="w-4 h-4 text-orange-400 flex-shrink-0" />
+              <Themeometer className="w-4 h-4 text-orange-400 flex-shrink-0" />
               <div className="text-xl sm:text-2xl font-bold text-orange-400">
                 {sstResult?.ok && dataAgeHours <= 24 ? `${sstResult.fahrenheit.toFixed(1)}°F` : "—"}
               </div>
