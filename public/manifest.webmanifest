@@ -1,0 +1,20 @@
+{
+  "name": "Tactical Offshore",
+  "short_name": "Tactical",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "icons": [
+    {
+      "src": "/icon-marlin-final-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-marlin-final-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
