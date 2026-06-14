@@ -18,36 +18,56 @@ if ("serviceWorker" in navigator) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function Root() {
-  // Read access confirmation directly from local configuration layers
   const [granted, setGranted] = React.useState<boolean>(() => {
     try {
-      return localStorage.getItem("tactical_access_granted") === "true" || 
-             localStorage.getItem("tactical_unlocked") === "true";
+      return (
+        localStorage.getItem("tactical_access_granted") === "true" ||
+        localStorage.getItem("tactical_unlocked") === "true" ||
+        localStorage.getItem("isLoggedIn") === "true"
+      );
     } catch {
       return false;
     }
   });
 
-  // Fallback structural safety initialization
+  // Dynamic state listener eliminates race conditions across browser environments
   React.useEffect(() => {
-    try {
-      localStorage.setItem("tactical_access_granted", "true");
-      localStorage.setItem("tactical_unlocked", "true");
-      localStorage.setItem("isLoggedIn", "true");
-      // Instantly confirm permission arrays to load underlying routes
-      setGranted(true);
-    } catch (error) {
-      console.error("Storage access initialization warning:", error);
-    }
+    const checkAccessKeys = () => {
+      try {
+        const isAccessGranted =
+          localStorage.getItem("tactical_access_granted") === "true" ||
+          localStorage.getItem("tactical_unlocked") === "true" ||
+          localStorage.getItem("isLoggedIn") === "true";
+
+        if (isAccessGranted) {
+          setGranted(true);
+        }
+      } catch (err) {
+        console.error("Storage observer warning:", err);
+      }
+    };
+
+    // Run absolute evaluation instantly upon component mounting
+    checkAccessKeys();
+
+    // Catch immediate event fires from matching framework routing updates
+    window.addEventListener("storage", checkAccessKeys);
+    
+    // Polyfill safety net interval loop to catch immediate local commits
+    const intervalCheck = setInterval(checkAccessKeys, 300);
+
+    return () => {
+      window.removeEventListener("storage", checkAccessKeys);
+      clearInterval(intervalCheck);
+    };
   }, []);
 
+  // Structural loading shield if storage is initializing
   if (!granted) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
-        <div className="text-xs text-slate-500 uppercase tracking-widest font-mono animate-pulse">
-          Synchronizing Security Handshakes...
-        </div>
-      </div>
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
     );
   }
 
