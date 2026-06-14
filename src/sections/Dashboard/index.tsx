@@ -102,7 +102,6 @@ export default function Dashboard() {
   useEffect(() => {
     let isMounted = true;
 
-    // Evaluate terminal verification indexes inside persistent local storage
     const isAccessGranted = 
       localStorage.getItem("tactical_access_granted") === "true" ||
       localStorage.getItem("tactical_unlocked") === "true" ||
@@ -116,7 +115,6 @@ export default function Dashboard() {
       return;
     }
 
-    // Authorization checks passed safely, initiate localized telemetry matrix sync
     if (isMounted) {
       setAuthLoading(false);
       initializeDashboardData();
@@ -130,7 +128,7 @@ export default function Dashboard() {
   const initializeDashboardData = () => {
     setSolunar(getDashboardSolunar());
 
-    fetch("//.netlify/functions/get-latest-brief")
+    fetch("/.netlify/functions/get-latest-brief")
       .then((res) => {
         if (!res.ok) throw new Error("Synchronization offline");
         return res.json();
@@ -193,7 +191,7 @@ export default function Dashboard() {
 
   return (
     <div className="p-4 space-y-6">
-      {/* Data Age Warning Banner */}
+      {/* Warning Banner */}
       {!briefLoading && dataAgeHours > 12 && (
         <div className={`flex items-center gap-3 p-3 rounded-xl border font-medium text-xs ${
           dataAgeHours > 24 ? "bg-red-950/40 text-red-400 border-red-900/60" : "bg-orange-950/40 text-orange-400 border-orange-900/60"
@@ -210,7 +208,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Briefing Section */}
+      {/* Briefing Core */}
       <section className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 rounded-xl p-4 border border-slate-700/60 shadow-lg">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2 text-cyan-400 font-bold tracking-wide text-xs uppercase">
@@ -265,7 +263,7 @@ export default function Dashboard() {
         )}
       </section>
 
-      {/* Navigation Matrix */}
+      {/* Grid Links */}
       <section>
         <h2 className="text-xl font-bold text-white mb-4">Quick Access</h2>
         <div className="grid grid-cols-2 gap-3">
@@ -288,7 +286,7 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {/* Marine Analytics Outputs */}
+      {/* Outlook Metrics */}
       <section className="bg-slate-800 rounded-xl p-4 border border-slate-700">
         <h3 className="font-semibold text-white mb-3">Today's Outlook</h3>
         <div className="grid grid-cols-2 gap-2 text-center">
@@ -311,7 +309,7 @@ export default function Dashboard() {
           </div>
           <div className="bg-slate-700/50 rounded-xl py-3 px-2">
             <div className="flex items-center justify-center gap-1">
-              <Themeometer className="w-4 h-4 text-orange-400 flex-shrink-0" />
+              <Compass className="w-4 h-4 text-orange-400 flex-shrink-0" /> {/* Replaced completely with valid Compass fallback icon to maintain safe UI styling blocks */}
               <div className="text-xl sm:text-2xl font-bold text-orange-400">
                 {sstResult?.ok && dataAgeHours <= 24 ? `${sstResult.fahrenheit.toFixed(1)}°F` : "—"}
               </div>
