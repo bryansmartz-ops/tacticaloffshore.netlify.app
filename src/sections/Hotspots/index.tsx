@@ -1,7 +1,3 @@
-// src/sections/Hotspots/index.tsx
-// High-Fidelity Tactical Hotspots Section - Unified Marine Weather Integration
-// ─────────────────────────────────────────────────────────────────────
-
 import { useState, useCallback, useEffect } from "react";
 import {
   Target,
@@ -21,13 +17,21 @@ import type { HotspotDisplay } from "../../components/FishingMap";
 import { getCacheAge, gibsSSTDate } from "../../lib/erddap";
 import {
   toLoranTD,
-  confidenceColor,
   HOTSPOT_DEFS,
   HOTSPOTS_IN_RANGE,
   buildHotspotSignals,
   computeConfidence,
   speciesFromSST,
 } from "../../lib/hotspots";
+
+const SST_HISTORY_OFFSETS = [0, 1, 2, 3];
+
+// Isolated visual guard to prevent silent runtime style compilation failures
+function getLocalConfidenceColor(score: number): string {
+  if (score >= 80) return "#34d399"; // emerald-400
+  if (score >= 65) return "#fbbf24"; // amber-400
+  return "#f87171"; // red-400
+}
 
 export default function Hotspots() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -39,7 +43,7 @@ export default function Hotspots() {
   const [showSST, setShowSST] = useState(true);
   const [showBathy, setShowBathy] = useState(true);
   const [showWeather, setShowWeather] = useState(false); 
-  const [sstOffset, setSstOffset] = useState<number>(0); // 0=Live, 1=-12h, 2=-24h, 3=-36h
+  const [sstOffset, setSstOffset] = useState<number>(0); 
   const [showControls, setShowControls] = useState(false);
 
   // Live-resolved data frameworks
@@ -200,7 +204,6 @@ export default function Hotspots() {
 
           {showControls && (
             <div className="bg-slate-900/95 border border-slate-700 p-3 rounded-xl shadow-2xl w-48 space-y-3 backdrop-blur-sm text-xs text-slate-200">
-              {/* Layer Toggles */}
               <div className="space-y-1.5">
                 <div className="font-semibold text-slate-400 tracking-wider uppercase text-[10px]">Layers</div>
                 <label className="flex items-center gap-2 cursor-pointer">
@@ -221,7 +224,6 @@ export default function Hotspots() {
                 </label>
               </div>
 
-              {/* Time Playback */}
               <div className="space-y-1.5 border-t border-slate-800 pt-2">
                 <div className="font-semibold text-slate-400 tracking-wider uppercase text-[10px] flex items-center gap-1">
                   <History className="w-3 h-3" /> Historical Playback
@@ -322,7 +324,6 @@ export default function Hotspots() {
           const isSelected = selectedId === h.id;
           const isLoading = loadingIds.has(h.id);
           const def = dynamicDefs.find((d) => d.id === h.id);
-
           const hasLiveSST = !isLoading;
 
           return (
@@ -365,7 +366,7 @@ export default function Hotspots() {
                     <>
                       <div
                         className="text-lg font-bold"
-                        style={{ color: confidenceColor(h.confidence) }}
+                        style={{ color: getLocalConfidenceColor(h.confidence) }}
                       >
                         {h.confidence}%
                       </div>
@@ -404,14 +405,14 @@ export default function Hotspots() {
                 )}
               </div>
 
-              {!isLoading && (
+              {!isLoading && h.signals && (
                 <div className="space-y-0.5 mt-1">
                   {[
-                    { label: "SST", val: h.signals.sstScore, max: 20, color: "#fb923c" },
-                    { label: "Break", val: h.signals.sstBreakScore, max: 35, color: "#fbbf24" },
-                    { label: "Chloro", val: h.signals.chloroScore, max: 20, color: "#4ade80" },
-                    { label: "SSH", val: h.signals.altimetryScore, max: 15, color: "#818cf8" },
-                    { label: "History", val: h.signals.historyReportsScore, max: 10, color: "#67e8f9" },
+                    { label: "SST", val: h.signals.sstScore || 0, max: 20, color: "#fb923c" },
+                    { label: "Break", val: h.signals.sstBreakScore || 0, max: 35, color: "#fbbf24" },
+                    { label: "Chloro", val: h.signals.chloroScore || 0, max: 20, color: "#4ade80" },
+                    { label: "SSH", val: h.signals.altimetryScore || 0, max: 15, color: "#818cf8" },
+                    { label: "History", val: h.signals.historyReportsScore || 0, max: 10, color: "#67e8f9" },
                   ].map((r) => (
                     <div key={r.label} className="flex items-center gap-1.5">
                       <span className="text-[9px] text-slate-500 w-10 shrink-0">{r.label}</span>
@@ -439,7 +440,7 @@ export default function Hotspots() {
                 </div>
               )}
 
-              {!isLoading && h.species.length > 0 && (
+              {!isLoading && h.species && h.species.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-1">
                   {h.species.map((s) => (
                     <span key={s} className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full">
@@ -451,7 +452,7 @@ export default function Hotspots() {
 
               {!isLoading && (
                 <div className="text-[10px] text-slate-600 mt-0.5">
-                  {def ? `${def.idealSstF}°F ideal · ${def.historyPrior}/10 history score` : ""}
+                  {def ? `${def.idealSstF || 72}°F ideal · ${def.historyPrior || 0}/10 history score` : ""}
                 </div>
               )}
             </div>
