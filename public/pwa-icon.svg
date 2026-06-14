@@ -1,0 +1,23 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Blue gradient background -->
+  <rect width="512" height="512" rx="96" fill="url(#gradient)"/>
+  <defs>
+    <linearGradient id="gradient" x1="0" y1="0" x2="512" y2="512">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1e40af"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Fish icon -->
+  <g transform="translate(128, 180)">
+    <path d="M256 112c-48.6 0-93.3 18.7-126.5 49.4L64 192v96l65.5 30.6C162.7 349.3 207.4 368 256 368s93.3-18.7 126.5-49.4L448 288v-96l-65.5-30.6C349.3 130.7 304.6 112 256 112z" fill="white" opacity="0.95"/>
+    <circle cx="80" cy="32" r="12" fill="white"/>
+    <path d="M-20 32 L0 16 L0 48 Z" fill="white" opacity="0.9"/>
+  </g>
+
+  <!-- Waves at bottom -->
+  <g transform="translate(0, 380)">
+    <path d="M0 20 Q64 0, 128 20 T256 20 T384 20 T512 20 L512 132 L0 132 Z" fill="white" opacity="0.15"/>
+    <path d="M0 40 Q64 20, 128 40 T256 40 T384 40 T512 40 L512 132 L0 132 Z" fill="white" opacity="0.1"/>
+  </g>
+</svg>
