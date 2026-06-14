@@ -1,12 +1,16 @@
-// src/lib/supabase.ts
+// main/src/lib/supabase.ts
 // Core Supabase Authentication and Database Client Engine
 // ──────────────────────────────────────────────────────────────────────────────────────
 
-import { createClient } from '@supabase/supabase-base-js';
+import { createClient } from '@supabase/supabase-js';
 
-// Fallback gracefully to standard project configurations if env variables are empty
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-fallback-project.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
+// Connects directly to the environment keys we placed in the root .env file
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn("[supabase-init] Missing cryptographic credentials. Environment configuration unaligned.");
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -22,7 +26,7 @@ export async function verifyDeviceActivation(activationCode: string): Promise<{ 
 
     if (error) throw error;
     if (data && data.success) {
-      // Safely cache the authenticated token state locally to survive offshore power cycles
+      // Cache the authenticated token state locally to survive offshore power cycles
       localStorage.setItem('tac_offshore_token', data.token);
       return { success: true, token: data.token };
     }
