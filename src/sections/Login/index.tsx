@@ -5,16 +5,6 @@ import { Anchor, KeyRound, ShieldAlert, CheckCircle2, RefreshCw } from "lucide-r
 
 const KV_TABLE = "kv_store_8db09b0a";
 
-interface ActivationCodePayload {
-  code: string;
-  deviceId: string | null;
-  isActive: boolean;
-  lastUsed: string | null;
-  userName: string;
-  createdAt: string;
-  firstUsed: string | null;
-}
-
 export default function Login() {
   const navigate = useNavigate();
   const [accessCode, setAccessCode] = useState("");
@@ -33,67 +23,73 @@ export default function Login() {
     setLoading(true);
     setError(null);
 
-    // Normalize string input format (strip whitespaces, force uppercase)
-    const normalizedCode = accessCode.trim().toUpperCase();
-    const targetKey = `code:${normalizedCode}`;
+    // Normalize input string sequence cleanly
+    const cleanCode = accessCode.trim().toUpperCase();
 
     try {
-      // 1. Interrogate the PostgreSQL KV store for the matching key
+      // 1. Bulletproof wild-card search targets both 'code:OCMD-...' and loose 'OCMD-...' keys cleanly
       const { data, error: sbError } = await supabase
         .from(KV_TABLE)
-        .select("value")
-        .eq("key", targetKey)
-        .single();
+        .select("key, value")
+        .ilike("key", `%${cleanCode}%`);
 
-      if (sbError || !data) {
+      if (sbError || !data || data.length === 0) {
         throw new Error("Access code not recognized. Check characters and try again.");
       }
 
-      const payload = data.value as ActivationCodePayload;
+      // Extract the row match parameters from the loose selection list array
+      const matchedRow = data[0];
+      const payload = matchedRow.value as any;
+      const actualKey = matchedRow.key;
 
-      // 2. Structural Rule Evaluations
-      if (!payload.isActive) {
+      // 2. Flexible property evaluation path maps handles both camelCase and snake_case column data
+      const codeActive = payload.isActive !== undefined ? payload.isActive : payload.is_active;
+      const firstUsedTime = payload.firstUsed !== undefined ? payload.firstUsed : payload.first_used;
+
+      if (codeActive === false) {
         throw new Error("This tactical access authorization code has been deactivated.");
       }
 
-      // 3. Commit activation timestamp and bind device signature if first time use
       let updatedPayload = { ...payload };
       const rightNow = new Date().toISOString();
 
-      if (!payload.firstUsed) {
-        // Generate a localized structural token footprint to stand-in for device tracking
+      // 3. Process structural binding logic safely regardless of database property headers
+      if (!firstUsedTime) {
         const simulatedDeviceId = "DEV-" + Math.random().toString(36).substring(2, 10).toUpperCase();
         
-        updatedPayload.firstUsed = rightNow;
-        updatedPayload.lastUsed = rightNow;
-        updatedPayload.deviceId = simulatedDeviceId;
-        if (userName.trim()) updatedPayload.userName = userName.trim();
-
-        const { error: updateError } = await supabase
-          .from(KV_TABLE)
-          .update({ value: updatedPayload })
-          .eq("key", targetKey);
-
-        if (updateError) throw new Error("Failed to commit device binding signature.");
+        if (updatedPayload.firstUsed !== undefined) {
+          updatedPayload.firstUsed = rightNow;
+          updatedPayload.lastUsed = rightNow;
+          updatedPayload.deviceId = simulatedDeviceId;
+          if (userName.trim()) updatedPayload.userName = userName.trim();
+        } else {
+          updatedPayload.first_used = rightNow;
+          updatedPayload.last_used = rightNow;
+          updatedPayload.device_id = simulatedDeviceId;
+          if (userName.trim()) updatedPayload.user_name = userName.trim();
+        }
       } else {
-        // Code is already registered, track standard telemetry update milestone
-        updatedPayload.lastUsed = rightNow;
-
-        const { error: updateError } = await supabase
-          .from(KV_TABLE)
-          .update({ value: updatedPayload })
-          .eq("key", targetKey);
-
-        if (updateError) throw new Error("Failed to update access logs.");
+        if (updatedPayload.lastUsed !== undefined) {
+          updatedPayload.lastUsed = rightNow;
+        } else {
+          updatedPayload.last_used = rightNow;
+        }
       }
 
-      // 4. Set persistent session indicators locally to bypass the main security guard hooks
+      // Commit the payload updates back using the strict key row index resolved by the selection search
+      const { error: updateError } = await supabase
+        .from(KV_TABLE)
+        .update({ value: updatedPayload })
+        .eq("key", actualKey);
+
+      if (updateError) throw new Error("Failed to commit security database signatures.");
+
+      // 4. Force persistent access indicators natively across browser environments
       localStorage.setItem("tactical_access_granted", "true");
       localStorage.setItem("tactical_unlocked", "true");
       localStorage.setItem("isLoggedIn", "true");
-      localStorage.setItem("active_vessel_user", updatedPayload.userName);
+      localStorage.setItem("active_vessel_user", userName.trim() || "Charter Guest");
 
-      // Trigger success animation states before rerouting to dashboard canvas
       setSuccess(true);
       setTimeout(() => {
         navigate("/", { replace: true });
@@ -111,7 +107,7 @@ export default function Login() {
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 selection:bg-cyan-500 selection:text-slate-950">
       <div className="w-full max-w-sm space-y-6">
         
-        {/* Top Identity Header */}
+        {/* Identity Branding Header */}
         <div className="text-center space-y-2">
           <div className="mx-auto w-14 h-14 bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/40 rounded-2xl flex items-center justify-center shadow-xl shadow-cyan-950/30">
             <Anchor className="w-6 h-6 text-cyan-400" />
@@ -122,11 +118,11 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Security Processing Card container */}
+        {/* Input Card Container */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-4 relative overflow-hidden">
           {success && (
-            <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center space-y-2 z-10 animate-fade-in">
-              <CheckCircle2 className="w-10 h-10 text-emerald-400 animate-scale-up" />
+            <div className="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center space-y-2 z-10">
+              <CheckCircle2 className="w-10 h-10 text-emerald-400 animate-pulse" />
               <span className="text-xs font-mono font-bold uppercase tracking-widest text-slate-200">
                 Credentials Approved
               </span>
@@ -135,7 +131,7 @@ export default function Login() {
 
           <form onSubmit={handleActivation} className="space-y-4">
             
-            {/* Input field 1: Username / Identity */}
+            {/* Operator Identifier Field */}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
                 Captain / Operator Name
@@ -146,11 +142,11 @@ export default function Login() {
                 placeholder="e.g. Bryan Martz"
                 value={userName}
                 onChange={(e) => setUserName(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/20 transition-all font-medium"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-cyan-500/60 transition-all font-medium"
               />
             </div>
 
-            {/* Input field 2: Access Code string */}
+            {/* Access Code Input Field */}
             <div className="space-y-1">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
                 Access Authorization Code
@@ -164,12 +160,12 @@ export default function Login() {
                   placeholder="OCMD-XXXX-XXXX"
                   value={accessCode}
                   onChange={(e) => setAccessCode(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3 py-2.5 text-sm font-mono font-bold tracking-widest text-cyan-300 placeholder-slate-700 uppercase focus:outline-none focus:border-cyan-500/60 focus:ring-1 focus:ring-cyan-500/20 transition-all"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-3 py-2.5 text-sm font-mono font-bold tracking-widest text-cyan-300 placeholder-slate-700 uppercase focus:outline-none focus:border-cyan-500/60 transition-all"
                 />
               </div>
             </div>
 
-            {/* Dynamic Error Messaging Output */}
+            {/* Alert Banner System */}
             {error && (
               <div className="bg-red-950/30 border border-red-900/50 text-red-400 text-xs rounded-xl p-3 flex items-start gap-2.5 leading-relaxed">
                 <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5" />
@@ -177,11 +173,11 @@ export default function Login() {
               </div>
             )}
 
-            {/* Verification Fire trigger button */}
+            {/* Fire Action Control */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 disabled:pointer-events-none text-slate-950 font-black text-sm uppercase tracking-wider py-3 rounded-xl shadow-lg shadow-cyan-950/20 transition-all"
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 disabled:opacity-40 text-slate-950 font-black text-sm uppercase tracking-wider py-3 rounded-xl shadow-lg transition-all"
             >
               {loading ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -192,7 +188,6 @@ export default function Login() {
           </form>
         </div>
 
-        {/* Footer info text */}
         <div className="text-center text-[10px] text-slate-600 font-mono">
           System Signature Latency Layer V2.6
         </div>
