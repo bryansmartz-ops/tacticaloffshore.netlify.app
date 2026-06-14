@@ -1,19 +1,17 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    host: true,
-    proxy: {
-      // In local dev (vite), forward Netlify function calls to netlify dev (port 8888).
-      // If you run only `vite` without `netlify dev`, the function won't be reachable
-      // locally — but production (Netlify) always works correctly.
-      "/.netlify/functions": {
-        target: "http://localhost:8888",
-        changeOrigin: true,
-        secure: false,
-      },
+manifest: {
+  name: 'Tactical Offshore',
+  short_name: 'Tactical',
+  theme_color: '#020617',
+  icons: [
+    {
+      src: 'icon-marlin-final-192.png', // No /icons/ subfolder path
+      sizes: '192x192',
+      type: 'image/png'
     },
-  },
-});
+    {
+      src: 'icon-marlin-final-512.png',
+      sizes: '512x512',
+      type: 'image/png'
+    }
+  ]
+}
