@@ -1,7 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
-// Bypasses relative path tracking completely by forcing the compiler to resolve from the src root folder
-import { supabase } from "@/supabaseClient"; 
+import { supabase } from "../../lib/supabase"; 
 import {
   Map,
   Fish,
