@@ -8,6 +8,7 @@ import Solunar from "./sections/Solunar";
 import Tides from "./sections/Tides";
 import Weather from "./sections/Weather";
 import AdminPanel from "./sections/Admin";
+import Login from "./sections/Login"; // Verified path import for long-term Option B
 
 const TacticalMap = lazy(() => import("./sections/TacticalMap"));
 const Hotspots = lazy(() => import("./sections/Hotspots"));
@@ -25,9 +26,12 @@ function MapFallback() {
 
 export default function App() {
   useEffect(() => {
+    // Keep internal fallbacks stable during router changes
     try {
-      localStorage.setItem("tactical_unlocked", "true");
-      localStorage.setItem("isLoggedIn", "true");
+      if (localStorage.getItem("tactical_access_granted") === "true") {
+        localStorage.setItem("tactical_unlocked", "true");
+        localStorage.setItem("isLoggedIn", "true");
+      }
     } catch (error) {
       console.error("Initialization warning:", error);
     }
@@ -35,6 +39,10 @@ export default function App() {
 
   return (
     <Routes>
+      {/* Isolated login route layout outside of core tab bar wrap controls */}
+      <Route path="login" element={<Login />} />
+
+      {/* Authenticated Application Shell routes */}
       <Route path="/" element={<Layout />}>
         <Route index element={<Dashboard />} />
         <Route path="map" element={<Suspense fallback={<MapFallback />}><TacticalMap /></Suspense>} />
