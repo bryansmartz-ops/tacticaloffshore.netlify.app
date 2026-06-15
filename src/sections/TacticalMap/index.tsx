@@ -17,6 +17,7 @@ import { supabase } from "../../lib/supabase";
 
 const SST_HISTORY_OFFSETS = [0, 1, 2, 3];
 const KV_TABLE = "kv_store_8db09b0a";
+const SERVER_PROXY_URL = `/.netlify/functions/get-latest-briefs`;
 
 export interface Waypoint {
   id: string;
@@ -28,8 +29,6 @@ export interface Waypoint {
   tdX: string;
   savedAt: string;
 }
-
-const activeHotspotDefs = HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS;
 
 export default function TacticalMap() {
   const [showSST, setShowSST] = useState(true);
@@ -44,10 +43,41 @@ export default function TacticalMap() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [wpMutating, setWpMutating] = useState(false);
 
-  // ── INFRASTRUCTURE MOUNT VERIFICATION LAYERS ──────────────────────────────
+  // High-performance state hooks
   const containerRef = useRef<HTMLDivElement>(null);
   const [isDimensionsReady, setIsDimensionsReady] = useState(false);
+  const [cloudHotspots, setCloudHotspots] = useState<any[]>([]);
+  const [isProcessing, setIsProcessing] = useState(true);
 
+  // ── PRE-COMPUTED TELEMETRY FETCH HOOK ──────────────────────────────────────
+  const fetchCloudMetrics = async () => {
+    try {
+      const res = await fetch(SERVER_PROXY_URL);
+      if (!res.ok) throw new Error(`Proxy HTTP Error ${res.status}`);
+      const payload = await res.json();
+      
+      if (payload?.preScoredHotspots) {
+        // Defer rendering insertion by a single macro-frame to preserve thread animations
+        setTimeout(() => {
+          setCloudHotspots(payload.preScoredHotspots);
+          setIsProcessing(false);
+        }, 50);
+      } else {
+        setCloudHotspots(HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS);
+        setIsProcessing(false);
+      }
+    } catch (err) {
+      console.warn("Proxy telemetry array delayed, using local fallback models.", err);
+      setCloudHotspots(HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS);
+      setIsProcessing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCloudMetrics();
+  }, [sstOffset]);
+
+  // Viewport resize tracking safety gate
   useEffect(() => {
     const observeTarget = containerRef.current;
     if (!observeTarget) {
@@ -55,7 +85,6 @@ export default function TacticalMap() {
       return;
     }
 
-    // Safety Engine tracking real-time layout pixel updates
     const resizeObserver = new ResizeObserver((entries) => {
       for (let entry of entries) {
         const { width, height } = entry.contentRect;
@@ -72,7 +101,7 @@ export default function TacticalMap() {
     };
   }, []);
 
-  // ── Sync Waypoint Vectors Natively from Supabase ─────────────────────────
+  // Sync Waypoints from Supabase
   const fetchWaypoints = async () => {
     try {
       const { data, error } = await supabase
@@ -81,14 +110,13 @@ export default function TacticalMap() {
         .like("key", "waypoint:%");
 
       if (error) throw error;
-
       if (data) {
         const parsedWps = data.map((row: any) => row.value as Waypoint);
         parsedWps.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
         setWaypoints(parsedWps);
       }
     } catch (err) {
-      console.error("[Waypoint Synchronization Failure]:", err);
+      console.error("[Waypoint Sync Failure]:", err);
     }
   };
 
@@ -96,7 +124,6 @@ export default function TacticalMap() {
     fetchWaypoints();
   }, []);
 
-  // ── Save Waypoints ───────────────────────────────────────────────────────
   const handleSaveWaypoint = useCallback(
     async (name: string, lat: number, lng: number, tdW: string, tdX: string) => {
       setWpMutating(true);
@@ -120,7 +147,7 @@ export default function TacticalMap() {
         if (error) throw error;
         await fetchWaypoints();
       } catch (err) {
-        console.error("[Waypoint Persistence Failed]:", err);
+        console.error("[Waypoint Save Failure]:", err);
       } finally {
         setWpMutating(false);
       }
@@ -128,7 +155,6 @@ export default function TacticalMap() {
     []
   );
 
-  // ── Delete Waypoints ─────────────────────────────────────────────────────
   const deleteWaypoint = useCallback(
     async (id: string) => {
       setWpMutating(true);
@@ -141,7 +167,7 @@ export default function TacticalMap() {
         if (error) throw error;
         await fetchWaypoints();
       } catch (err) {
-        console.error("[Waypoint Deletion Failed]:", err);
+        console.error("[Waypoint Deletion Failure]:", err);
       } finally {
         setWpMutating(false);
       }
@@ -149,7 +175,7 @@ export default function TacticalMap() {
     []
   );
 
-  // Animation loop
+  // Animation frame loop
   useEffect(() => {
     if (isAnimating) {
       if (animIntervalRef.current) clearInterval(animIntervalRef.current);
@@ -173,11 +199,11 @@ export default function TacticalMap() {
   return (
     <div ref={containerRef} className="h-[calc(100vh-8rem)] relative w-full overflow-hidden bg-slate-950">
       
-      {/* ── Hardened Map Instantiation Check Gate ─────────────────────── */}
-      {isDimensionsReady ? (
+      {/* Structural Thread Verification Gateway */}
+      {isDimensionsReady && !isProcessing ? (
         <FishingMap
           mode="full"
-          hotspotDefs={activeHotspotDefs}
+          hotspotDefs={cloudHotspots}
           showSST={showSST}
           sstOffset={sstOffset}
           showBathy={showBathy}
@@ -189,50 +215,34 @@ export default function TacticalMap() {
       ) : (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 gap-3 text-slate-400 z-[1500]">
           <div className="w-6 h-6 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin" />
-          <span className="text-xs font-medium tracking-wide">Calibrating Chart Viewport…</span>
+          <span className="text-xs font-medium tracking-wide">Syncing Pre-Scored Thermal Hotspots…</span>
         </div>
       )}
 
-      {/* ── Waypoints panel ────────────────────────────────────────────── */}
+      {/* Waypoints Panel */}
       {showWaypoints && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1200] w-[min(340px,calc(100vw-24px))] bg-slate-900/95 border border-cyan-700 rounded-xl shadow-2xl flex flex-col max-h-[70vh]">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
             <span className="text-sm font-bold text-cyan-400 flex items-center gap-1.5">
               <BookmarkCheck className="w-4 h-4" /> Saved Waypoints ({waypoints.length})
             </span>
-            <button
-              onClick={() => setShowWaypoints(false)}
-              className="text-slate-400 hover:text-white p-1"
-            >
+            <button onClick={() => setShowWaypoints(false)} className="text-slate-400 hover:text-white p-1">
               <X className="w-4 h-4" />
             </button>
           </div>
           <div className="overflow-y-auto flex-1">
             {waypoints.length === 0 ? (
               <div className="text-slate-500 text-xs text-center py-8 px-4">
-                No waypoints saved yet.
-                <br />
-                Tap anywhere on the map to add one.
+                No waypoints saved yet. <br /> Tap anywhere on the map to add one.
               </div>
             ) : (
               waypoints.map((wp) => (
-                <div
-                  key={wp.id}
-                  className="flex items-start gap-2 px-3 py-2.5 border-b border-slate-800 last:border-0"
-                >
+                <div key={wp.id} className="flex items-start gap-2 px-3 py-2.5 border-b border-slate-800 last:border-0">
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-white truncate">
-                      {wp.name}
-                    </div>
-                    <div className="text-xs text-cyan-400">
-                      {wp.lat.toFixed(4)}°N, {Math.abs(wp.lng).toFixed(4)}°W
-                    </div>
-                    <div className="text-xs text-slate-400">
-                      📡 LORAN W {wp.tdW} / X {wp.tdX} μs
-                    </div>
-                    <div className="text-[10px] text-slate-600 mt-0.5">
-                      {new Date(wp.savedAt).toLocaleDateString()}
-                    </div>
+                    <div className="text-sm font-semibold text-white truncate">{wp.name}</div>
+                    <div className="text-xs text-cyan-400">{wp.lat.toFixed(4)}°N, {Math.abs(wp.lng).toFixed(4)}°W</div>
+                    <div className="text-xs text-slate-400">📡 LORAN W {wp.tdW} / X {wp.tdX} μs</div>
+                    <div className="text-[10px] text-slate-600 mt-0.5">{new Date(wp.savedAt).toLocaleDateString()}</div>
                   </div>
                   <div className="flex flex-col gap-1 shrink-0">
                     <button
@@ -244,11 +254,7 @@ export default function TacticalMap() {
                     >
                       Go
                     </button>
-                    <button
-                      onClick={() => deleteWaypoint(wp.id)}
-                      disabled={wpMutating}
-                      className="text-red-400 hover:text-red-300 p-1 disabled:opacity-50"
-                    >
+                    <button onClick={() => deleteWaypoint(wp.id)} disabled={wpMutating} className="text-red-400 hover:text-red-300 p-1 disabled:opacity-50">
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
@@ -259,13 +265,11 @@ export default function TacticalMap() {
         </div>
       )}
 
-      {/* ── SST History panel ──────────────────────────────────────────── */}
+      {/* SST History Panel */}
       <div className="absolute bottom-4 left-3 z-[1000] bg-slate-900/95 border border-slate-600 rounded-lg px-2 py-1.5 flex flex-col items-center gap-1 w-[min(230px,calc(100vw-80px))]">
         <div className="flex items-center gap-1.5 w-full">
           <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
-          <span className="text-[9px] text-slate-300 font-semibold flex-1">
-            SST History
-          </span>
+          <span className="text-[9px] text-slate-300 font-semibold flex-1">SST History</span>
           <button
             onClick={() => {
               setIsAnimating((a) => !a);
@@ -285,66 +289,39 @@ export default function TacticalMap() {
                 setIsAnimating(false);
                 if (!showSST) setShowSST(true);
               }}
-              className={`py-0.5 rounded text-[9px] font-semibold border transition-all text-center leading-tight ${
-                sstOffset === offset
-                  ? "bg-orange-500 border-orange-400 text-white"
-                  : "bg-slate-800 border-slate-600 text-slate-400"
-              }`}
+              className={`py-0.5 rounded text-[9px] font-semibold border transition-all text-center leading-tight ${sstOffset === offset ? "bg-orange-500 border-orange-400 text-white" : "bg-slate-800 border-slate-600 text-slate-400"}`}
             >
               {gibsSSTLabel(offset)}
             </button>
           ))}
         </div>
-        <div className="text-[9px] text-slate-500 self-start">
-          {gibsSSTDate(3 + sstOffset)} · MUR 1km
-        </div>
+        <div className="text-[9px] text-slate-500 self-start">{gibsSSTDate(3 + sstOffset)} · MUR 1km</div>
       </div>
 
-      {/* ── Right-side toolbar ────────────────────────────────────────── */}
+      {/* Toolbar Layer */}
       <div className="absolute top-3 right-3 z-[1100] flex flex-col gap-2">
-        <button
-          onClick={() => setShowSST(!showSST)}
-          className={`p-2 rounded-lg border transition-all ${showSST ? "bg-orange-500 border-orange-400 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}
-          title="Toggle SST overlay"
-        >
+        <button onClick={() => setShowSST(!showSST)} className={`p-2 rounded-lg border transition-all ${showSST ? "bg-orange-500 border-orange-400 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}>
           <Thermometer className="w-5 h-5" />
         </button>
-        <button
-          onClick={() => setShowBathy(!showBathy)}
-          className={`p-2 rounded-lg border transition-all ${showBathy ? "bg-blue-500 border-blue-400 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}
-          title="Toggle bathymetry"
-        >
+        <button onClick={() => setShowBathy(!showBathy)} className={`p-2 rounded-lg border transition-all ${showBathy ? "bg-blue-500 border-blue-400 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}>
           <Layers className="w-5 h-5" />
         </button>
-        <button
-          onClick={() => setShowHotspots(!showHotspots)}
-          className={`p-2 rounded-lg border transition-all ${showHotspots ? "bg-emerald-600 border-emerald-500 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}
-          title="Toggle hotspots"
-        >
+        <button onClick={() => setShowHotspots(!showHotspots)} className={`p-2 rounded-lg border transition-all ${showHotspots ? "bg-emerald-600 border-emerald-500 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}>
           <Target className="w-5 h-5" />
         </button>
         <button
           onClick={() => {
             if (navigator.geolocation) {
               navigator.geolocation.getCurrentPosition((pos) => {
-                setFlyTo({
-                  lat: pos.coords.latitude,
-                  lng: pos.coords.longitude,
-                  zoom: 10,
-                });
+                setFlyTo({ lat: pos.coords.latitude, lng: pos.coords.longitude, zoom: 10 });
               });
             }
           }}
           className="p-2 rounded-lg bg-slate-800/90 border border-slate-600 text-slate-300 hover:bg-slate-700 transition-all"
-          title="Go to my location"
         >
           <Navigation className="w-5 h-5" />
         </button>
-        <button
-          onClick={() => setShowWaypoints((v) => !v)}
-          className={`p-2 rounded-lg border transition-all relative ${showWaypoints ? "bg-cyan-600 border-cyan-500 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300 hover:bg-slate-700"}`}
-          title="Saved waypoints"
-        >
+        <button onClick={() => setShowWaypoints((v) => !v)} className={`p-2 rounded-lg border transition-all relative ${showWaypoints ? "bg-cyan-600 border-cyan-500 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300 hover:bg-slate-700"}`}>
           <Bookmark className="w-5 h-5" />
           {waypoints.length > 0 && (
             <span className="absolute -top-1 -right-1 bg-cyan-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
@@ -354,31 +331,24 @@ export default function TacticalMap() {
         </button>
       </div>
 
-      {/* ── Legend ───────────────────────────────────────────────────────── */}
+      {/* Legend Container */}
       <div className="absolute top-3 left-3 z-[1000] bg-slate-800/90 rounded-lg p-2 border border-slate-700 space-y-1">
-        <div className="text-xs font-semibold text-slate-300 mb-1">
-          Hotspots
-        </div>
+        <div className="text-xs font-semibold text-slate-300 mb-1">Hotspots</div>
         {[
           { label: "High ≥80%", color: "#34d399" },
           { label: "Med 65–79%", color: "#fbbf24" },
           { label: "Low <65%", color: "#f87171" },
         ].map(({ label, color }) => (
           <div key={label} className="flex items-center gap-2">
-            <span
-              className="inline-block w-3 h-3 rounded-full border-2"
-              style={{ borderColor: color, background: color + "55" }}
-            />
+            <span className="inline-block w-3 h-3 rounded-full border-2" style={{ borderColor: color, background: color + "55" }} />
             <span className="text-xs text-slate-400">{label}</span>
           </div>
         ))}
       </div>
 
-      {/* ── SST tap-for-temp key ─────────────────────────────────────────── */}
+      {/* Tap Matrix Bar */}
       <div className="absolute bottom-3 right-3 z-[1000] bg-slate-900/85 rounded px-1.5 py-1 border border-slate-700/60">
-        <div className="text-[9px] text-slate-400 mb-0.5 leading-none">
-          tap map for temp
-        </div>
+        <div className="text-[9px] text-slate-400 mb-0.5 leading-none">tap map for temp</div>
         <div className="flex items-center gap-0.5">
           <span className="text-[8px] text-blue-400">60&#176;</span>
           <div className="w-16 h-1.5 rounded bg-gradient-to-r from-blue-500 via-yellow-400 to-red-500" />
