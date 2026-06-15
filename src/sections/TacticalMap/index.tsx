@@ -24,13 +24,12 @@ export interface Waypoint {
   lat: number;
   lng: number;
   tdW: string;
-  tdY: string; // Adjusted safely to mirror underlying object models natively
+  tdY: string; 
   tdX: string;
   savedAt: string;
 }
 
-const activeHotspotDefs =
-  HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS;
+const activeHotspotDefs = HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS;
 
 export default function TacticalMap() {
   const [showSST, setShowSST] = useState(true);
@@ -45,6 +44,34 @@ export default function TacticalMap() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [wpMutating, setWpMutating] = useState(false);
 
+  // ── INFRASTRUCTURE MOUNT VERIFICATION LAYERS ──────────────────────────────
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isDimensionsReady, setIsDimensionsReady] = useState(false);
+
+  useEffect(() => {
+    const observeTarget = containerRef.current;
+    if (!observeTarget) {
+      setIsDimensionsReady(true);
+      return;
+    }
+
+    // Safety Engine tracking real-time layout pixel updates
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 20 && height > 20) {
+          setIsDimensionsReady(true);
+        }
+      }
+    });
+
+    resizeObserver.observe(observeTarget);
+    return () => {
+      if (observeTarget) resizeObserver.unobserve(observeTarget);
+      resizeObserver.disconnect();
+    };
+  }, []);
+
   // ── Sync Waypoint Vectors Natively from Supabase ─────────────────────────
   const fetchWaypoints = async () => {
     try {
@@ -57,7 +84,6 @@ export default function TacticalMap() {
 
       if (data) {
         const parsedWps = data.map((row: any) => row.value as Waypoint);
-        // Sort newest saved entries to the top
         parsedWps.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
         setWaypoints(parsedWps);
       }
@@ -145,23 +171,31 @@ export default function TacticalMap() {
   }, [isAnimating]);
 
   return (
-    <div className="h-[calc(100vh-8rem)] relative">
-      {/* ── Shared map ─────────────────────────────────────────────────── */}
-      <FishingMap
-        mode="full"
-        hotspotDefs={activeHotspotDefs}
-        showSST={showSST}
-        sstOffset={sstOffset}
-        showBathy={showBathy}
-        showHotspots={showHotspots}
-        onSaveWaypoint={handleSaveWaypoint}
-        flyTo={flyTo}
-        className="absolute inset-0"
-      />
+    <div ref={containerRef} className="h-[calc(100vh-8rem)] relative w-full overflow-hidden bg-slate-950">
+      
+      {/* ── Hardened Map Instantiation Check Gate ─────────────────────── */}
+      {isDimensionsReady ? (
+        <FishingMap
+          mode="full"
+          hotspotDefs={activeHotspotDefs}
+          showSST={showSST}
+          sstOffset={sstOffset}
+          showBathy={showBathy}
+          showHotspots={showHotspots}
+          onSaveWaypoint={handleSaveWaypoint}
+          flyTo={flyTo}
+          className="absolute inset-0 w-full h-full"
+        />
+      ) : (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 gap-3 text-slate-400 z-[1500]">
+          <div className="w-6 h-6 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin" />
+          <span className="text-xs font-medium tracking-wide">Calibrating Chart Viewport…</span>
+        </div>
+      )}
 
       {/* ── Waypoints panel ────────────────────────────────────────────── */}
       {showWaypoints && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1200] w-[min(340px,calc(100vw-24px))] bg-slate-900/97 border border-cyan-700 rounded-xl shadow-2xl flex flex-col max-h-[70vh]">
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1200] w-[min(340px,calc(100vw-24px))] bg-slate-900/95 border border-cyan-700 rounded-xl shadow-2xl flex flex-col max-h-[70vh]">
           <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
             <span className="text-sm font-bold text-cyan-400 flex items-center gap-1.5">
               <BookmarkCheck className="w-4 h-4" /> Saved Waypoints ({waypoints.length})
@@ -273,7 +307,7 @@ export default function TacticalMap() {
           className={`p-2 rounded-lg border transition-all ${showSST ? "bg-orange-500 border-orange-400 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}
           title="Toggle SST overlay"
         >
-          <Themeometer className="w-5 h-5" />
+          <Thermometer className="w-5 h-5" />
         </button>
         <button
           onClick={() => setShowBathy(!showBathy)}
