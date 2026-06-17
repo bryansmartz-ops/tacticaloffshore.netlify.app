@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity WMS Image Overlay Mapping Engine - Accelerated Edition
+// High-Fidelity WMS Accelerated Overlay Mapping Engine
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -50,7 +50,6 @@ const BATHY_BASE_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Oc
 const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
 const WEATHER_WAVE_TILE = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"; 
 
-// High-efficiency serverless proxy vector connection endpoint
 const BRIEF_PROXY_ENDPOINT = "/.netlify/functions/get-latest-briefs";
 
 interface LiveBuoyData {
@@ -80,7 +79,7 @@ export default function FishingMap({
   const bathyBaseLayerRef = useRef<L.TileLayer | null>(null);
   const bathyOverlayLayerRef = useRef<L.TileLayer | null>(null);
   const weatherLayerRef = useRef<L.TileLayer | null>(null);
-  const sstWmsLayerRef = useRef<L.TileLayer.WMS | null>(null);
+  const sstStaticOverlayRef = useRef<L.ImageOverlay | null>(null);
   
   const [buoyData, setBuoyData] = useState<LiveBuoyData | null>(null);
   const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
@@ -101,12 +100,10 @@ export default function FishingMap({
         
         if (!activeScope) return;
 
-        // Sync local baseline temperatures for map calculation triggers
         if (payload?.live_sst_value) {
           setBaselineSst(payload.live_sst_value);
         }
 
-        // Map unified cascading fallback buoy parameters directly to popup fields
         const b = payload?.buoyFallback;
         if (b) {
           setBuoyData({
@@ -119,7 +116,6 @@ export default function FishingMap({
         }
       } catch (err) {
         console.warn("[FishingMap Telemetry Bypass]: Routing mathematical models.", err);
-        // Clean default safety mappings to preserve system up-times out of cell coverage
         setBuoyData({
           waveHeight: "3.0",
           period: "7",
@@ -190,7 +186,6 @@ export default function FishingMap({
       minZoom: 5
     });
 
-    // Layer stack ordering setup
     map.createPane("basePane").style.zIndex = "100";
     map.createPane("bathyBasePane").style.zIndex = "200";
     map.createPane("sstPane").style.zIndex = "300";
@@ -205,17 +200,15 @@ export default function FishingMap({
     bathyOverlayLayerRef.current = L.tileLayer(BATHY_OVERLAY_TILE, { maxNativeZoom: 10, maxZoom: 14, opacity: 0.45, pane: "bathyOverlayPane" });
     weatherLayerRef.current = L.tileLayer(WEATHER_WAVE_TILE, { maxZoom: 12, opacity: 0.65, pane: "weatherPane" });
 
-    // HIGH-PERFORMANCE HARDWARE ACCELERATED NOAA IMAGE RASTER OVERLAY (WMS)
-    // Instantly renders compressed transparent PNG chunks on the edge ADN nodes instead of looping numbers.
-    sstWmsLayerRef.current = L.tileLayer.wms("https://coastwatch.noaa.gov/erddap/wms/noaa_psd_esrl_sst/request", {
-      layers: "sst",
-      format: "image/png",
-      transparent: true,
-      version: "1.3.0",
-      crs: L.CRS.EPSG4326,
-      opacity: 0.52,
+    // HIGH-AVAILABILITY IMAGE OVERLAY RASTER PATTERN
+    // Static bound allocation strictly anchors the overlay box, defeating coordinate axis-flip limitations
+    const sstVisualBounds: L.LatLngBoundsExpression = [[37.0, -75.5], [39.5, -73.0]];
+    const highResSstUrl = `https://coastwatch.noaa.gov/erddap/wms/noaa_psd_esrl_sst/request?service=WMS&version=1.3.0&request=GetMap&layers=sst&styles=sst_color_bar&crs=EPSG:4326&bbox=37.0,-75.5,39.5,-73.0&width=800&height=800&format=image/png&transparent=true`;
+
+    sstStaticOverlayRef.current = L.imageOverlay(highResSstUrl, sstVisualBounds, {
       pane: "sstPane",
-      styles: "sst_color_bar"
+      opacity: 0.52,
+      interactive: false
     });
 
     if (showBathy) {
@@ -223,7 +216,7 @@ export default function FishingMap({
       bathyOverlayLayerRef.current.addTo(map);
     }
     if (showWeather) weatherLayerRef.current.addTo(map);
-    if (showSST) sstWmsLayerRef.current.addTo(map);
+    if (showSST) sstStaticOverlayRef.current.addTo(map);
 
     // UNIFIED REAL-TIME TELEMETRY POPUP DISPATCH SYSTEM
     map.on("click", (e: L.LeafletMouseEvent) => {
@@ -258,7 +251,6 @@ export default function FishingMap({
         .openOn(map);
     });
 
-    // Render static chart references for name structures
     CANYONS.forEach((c) => {
       L.marker([c.lat, c.lng], {
         pane: "labelPane",
@@ -302,11 +294,11 @@ export default function FishingMap({
       }
     }
 
-    if (sstWmsLayerRef.current) {
+    if (sstStaticOverlayRef.current) {
       if (showSST) {
-        if (!map.hasLayer(sstWmsLayerRef.current)) map.addLayer(sstWmsLayerRef.current);
+        if (!map.hasLayer(sstStaticOverlayRef.current)) map.addLayer(sstStaticOverlayRef.current);
       } else {
-        if (map.hasLayer(sstWmsLayerRef.current)) map.removeLayer(sstWmsLayerRef.current);
+        if (map.hasLayer(sstStaticOverlayRef.current)) map.removeLayer(sstStaticOverlayRef.current);
       }
     }
   }, [showBathy, showSST, showWeather]);
