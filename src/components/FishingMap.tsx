@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Client-Stabilized Oceanic Thermal Mapping Engine
+// High-Fidelity Geographically Clipped Thermal Mapping Engine
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -114,7 +114,7 @@ export default function FishingMap({
           });
         }
       } catch (err) {
-        console.warn("[Telemetry Recovery Link Actioned]: Using local backup models.", err);
+        console.warn("[Telemetry Fallback Implemented]: Routing local cache.", err);
         setBuoyData({
           waveHeight: "3.2",
           period: "8",
@@ -199,16 +199,15 @@ export default function FishingMap({
     bathyOverlayLayerRef.current = L.tileLayer(BATHY_OVERLAY_TILE, { maxNativeZoom: 10, maxZoom: 14, opacity: 0.45, pane: "bathyOverlayPane" });
     weatherLayerRef.current = L.tileLayer(WEATHER_WAVE_TILE, { maxZoom: 12, opacity: 0.65, pane: "weatherPane" });
 
-    // ── GEOGRAPHICALLY SHAPED COASTLINE GRADIENT ENGINE ────────────────────
-    // Restores your custom tracking bounds: South to Hatteras, North to OC New Jersey, 125NM offshore
+    // ── NATIVE POLYGON GEOGRAPHIC CLIPPING ENGINE ───────────────────────────
     const sstVisualBounds: L.LatLngBoundsExpression = [[35.0, -76.5], [39.5, -72.0]];
     const offscreenCanvas = document.createElement("canvas");
-    offscreenCanvas.width = 500;
-    offscreenCanvas.height = 500;
+    offscreenCanvas.width = 600;
+    offscreenCanvas.height = 600;
     const ctx = offscreenCanvas.getContext("2d");
     
     if (ctx) {
-      ctx.clearRect(0, 0, 500, 500);
+      ctx.clearRect(0, 0, 600, 600);
       
       const adjustedTemp = baselineSst + sstOffset;
       
@@ -226,23 +225,38 @@ export default function FishingMap({
         colorGulf = "rgba(22, 163, 74, 0.45)";
       }
 
-      // Anchoring coordinates directly at the shelf break to mirror the true 100 fathoms line contour
-      const radialGradient = ctx.createRadialGradient(
-        50,   250,  10,   // Center focus near the Virginia-Carolina coast
-        120,  250,  340   // Radiates out 125 nautical miles past the canyon ledge
-      );
-      
-      radialGradient.addColorStop(0, "rgba(15, 23, 42, 0.0)"); // Knocks color out over the land masses
-      radialGradient.addColorStop(0.18, "rgba(15, 23, 42, 0.0)");
-      radialGradient.addColorStop(0.24, colorCool);            // Inshore cool water boundary
-      radialGradient.addColorStop(0.55, colorBreak);           // Canyon ledge thermal walls
-      radialGradient.addColorStop(1.0, colorGulf);            // Deep ocean Gulf Stream edge
-      
-      ctx.fillStyle = radialGradient;
-      ctx.fillRect(0, 0, 500, 500);
+      // Hardened Map Projection Node Scalers (Translates Lat/Lng directly into Canvas pixels)
+      const latToY = (lat: number) => (1.0 - (lat - 35.0) / (39.5 - 35.0)) * 600;
+      const lngToX = (lng: number) => ((lng - (-76.5)) / (-72.0 - (-76.5))) * 600;
 
-      // Smooths pixel lines to simulate realistic fluid water temperature dispersion
-      ctx.filter = "blur(14px)";
+      // Define your custom tracking area boundary lines explicitly
+      ctx.beginPath();
+      ctx.moveTo(lngToX(-75.51), latToY(35.22)); // Cape Hatteras point node
+      ctx.lineTo(lngToX(-75.95), latToY(36.85)); // Virginia Beach shoreline track
+      ctx.lineTo(lngToX(-75.05), latToY(38.35)); // Ocean City Inlet baseline anchor
+      ctx.lineTo(lngToX(-74.25), latToY(39.50)); // Ocean City, New Jersey northern vector point
+      ctx.lineTo(lngToX(-72.05), latToY(39.50)); // Out 125 NM to the Hudson canyon boundary
+      ctx.lineTo(lngToX(-73.80), latToY(37.00)); // Slope tracking edge lines
+      ctx.lineTo(lngToX(-74.90), latToY(35.00)); // Out past the southern canyon drops
+      ctx.closePath();
+      
+      // Execute strict clipping mask to wipe away anything outside your fishing grid bounds
+      ctx.clip();
+
+      // Draw standard Mid-Atlantic canyon shelf gradient contours inside the clipped route path
+      const linearGradient = ctx.createLinearGradient(
+        lngToX(-75.30), latToY(36.50), 
+        lngToX(-72.50), latToY(38.80)
+      );
+      linearGradient.addColorStop(0, colorCool);
+      linearGradient.addColorStop(0.50, colorBreak);
+      linearGradient.addColorStop(1, colorGulf);
+      
+      ctx.fillStyle = linearGradient;
+      ctx.fillRect(0, 0, 600, 600);
+
+      // Apply blur to match true satellite transition patterns seamlessly
+      ctx.filter = "blur(10px)";
       
       const thermalImageString = offscreenCanvas.toDataURL();
       sstStaticOverlayRef.current = L.imageOverlay(thermalImageString, sstVisualBounds, {
@@ -258,7 +272,7 @@ export default function FishingMap({
     if (showWeather) weatherLayerRef.current.addTo(map);
     if (showSST && sstStaticOverlayRef.current) sstStaticOverlayRef.current.addTo(map);
 
-    // UNIFIED RE-STABILIZED CLICK TELEMETRY FIELD
+    // UNIFIED REAL-TIME TELEMETRY POPUP FIELD
     map.on("click", (e: L.LeafletMouseEvent) => {
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
@@ -301,9 +315,9 @@ export default function FishingMap({
 
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
-  }, [baselineSst, buoyData]);
+  }, [baselineSst, buoyData, showSST, sstOffset, showBathy, showWeather]);
 
-  // FLYTO LAYOUT ASSIGNMENTS
+  // FLYTO MAP VECTOR CONTROL
   useEffect(() => {
     const map = mapRef.current;
     if (map && flyTo) {
@@ -311,7 +325,7 @@ export default function FishingMap({
     }
   }, [flyTo]);
 
-  // VIEWPORT VISIBILITY LINK REFS
+  // LAYER SYNCHRONIZATION VIEWS
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -343,7 +357,7 @@ export default function FishingMap({
     }
   }, [showBathy, showSST, showWeather]);
 
-  // PINPOINT HOTSPOT OVERLAY VECTORS
+  // UNIFIED RE-ACCELERATED HOTSPOT PLOTS
   useEffect(() => {
     const map = mapRef.current;
     if (!map || liveHotspots.length === 0) return;
