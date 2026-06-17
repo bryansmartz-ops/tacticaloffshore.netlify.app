@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity WMS Accelerated Overlay Mapping Engine
+// High-Fidelity Proxy-Accelerated Image Overlay Mapping Engine
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -50,15 +50,9 @@ const BATHY_BASE_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Oc
 const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
 const WEATHER_WAVE_TILE = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"; 
 
-const BRIEF_PROXY_ENDPOINT = "/.netlify/functions/get-latest-briefs";
-
-interface LiveBuoyData {
-  waveHeight: string;
-  period: string;
-  windSpeed: string;
-  windDirection: string;
-  source: string;
-}
+// Consolidated internal serverless API route parameters
+const TELEMETRY_PROXY = "/.netlify/functions/get-latest-briefs";
+const ACCELERATED_SST_LAYER = "/.netlify/functions/get-latest-briefs?fetchSstLayer=true";
 
 export default function FishingMap({
   mode,
@@ -88,13 +82,11 @@ export default function FishingMap({
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  // ── 1. UNIFIED HARDENED TELEMETRY FETCH PIPELINE ─────────────────────────
   useEffect(() => {
     let activeScope = true;
-    
     async function loadCloudTelemetry() {
       try {
-        const response = await fetch(BRIEF_PROXY_ENDPOINT);
+        const response = await fetch(TELEMETRY_PROXY);
         if (!response.ok) throw new Error(`HTTP Matrix error ${response.status}`);
         const payload = await response.json();
         
@@ -111,17 +103,17 @@ export default function FishingMap({
             period: b.period !== null && b.period !== undefined ? b.period.toString() : "8",
             windSpeed: b.wind !== null && b.wind !== undefined ? `${b.wind}` : "10-15",
             windDirection: `${b.dir || "SW"}`,
-            source: b.activeStation || "NOAA HARMONIC MATRIX"
+            source: b.activeStation || "NOAA CLOUD INFRASTRUCTURE"
           });
         }
       } catch (err) {
-        console.warn("[FishingMap Telemetry Bypass]: Routing mathematical models.", err);
+        console.warn("[Telemetry Deferral Applied]: Using backup cache parameters.", err);
         setBuoyData({
           waveHeight: "3.0",
           period: "7",
           windSpeed: "12-18",
           windDirection: "SW",
-          source: "LOCAL PREDICTIVE CACHE"
+          source: "LOCAL REGIONAL CACHE"
         });
       }
     }
@@ -130,7 +122,6 @@ export default function FishingMap({
     return () => { activeScope = false; };
   }, []);
 
-  // ── 2. PRE-SCORING EVALUATION ENGINE ──────────────────────────────────────
   useEffect(() => {
     const calculatedSpots: HotspotDisplay[] = [];
     const canonicalDefs = hotspotDefs?.length > 0 ? hotspotDefs : [];
@@ -171,7 +162,6 @@ export default function FishingMap({
     onHotspotsResolved?.(calculatedSpots);
   }, [baselineSst, hotspotDefs]);
 
-  // ── 3. MAP INITIATION ENGINE ──────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -200,12 +190,10 @@ export default function FishingMap({
     bathyOverlayLayerRef.current = L.tileLayer(BATHY_OVERLAY_TILE, { maxNativeZoom: 10, maxZoom: 14, opacity: 0.45, pane: "bathyOverlayPane" });
     weatherLayerRef.current = L.tileLayer(WEATHER_WAVE_TILE, { maxZoom: 12, opacity: 0.65, pane: "weatherPane" });
 
-    // HIGH-AVAILABILITY IMAGE OVERLAY RASTER PATTERN
-    // Static bound allocation strictly anchors the overlay box, defeating coordinate axis-flip limitations
+    // ROUTE LAYER REQUEST DIRECTLY THROUGH INTERNAL PROXY CONTAINER
+    // Bypasses federal server CORS blocks by executing requests within your secure cloud infrastructure
     const sstVisualBounds: L.LatLngBoundsExpression = [[37.0, -75.5], [39.5, -73.0]];
-    const highResSstUrl = `https://coastwatch.noaa.gov/erddap/wms/noaa_psd_esrl_sst/request?service=WMS&version=1.3.0&request=GetMap&layers=sst&styles=sst_color_bar&crs=EPSG:4326&bbox=37.0,-75.5,39.5,-73.0&width=800&height=800&format=image/png&transparent=true`;
-
-    sstStaticOverlayRef.current = L.imageOverlay(highResSstUrl, sstVisualBounds, {
+    sstStaticOverlayRef.current = L.imageOverlay(ACCELERATED_SST_LAYER, sstVisualBounds, {
       pane: "sstPane",
       opacity: 0.52,
       interactive: false
@@ -218,7 +206,6 @@ export default function FishingMap({
     if (showWeather) weatherLayerRef.current.addTo(map);
     if (showSST) sstStaticOverlayRef.current.addTo(map);
 
-    // UNIFIED REAL-TIME TELEMETRY POPUP DISPATCH SYSTEM
     map.on("click", (e: L.LeafletMouseEvent) => {
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
@@ -230,9 +217,9 @@ export default function FishingMap({
       const wavePeriod = buoyData ? buoyData.period : "7";
       const windDirection = buoyData ? buoyData.windDirection : "SW";
       const windSpeed = buoyData ? buoyData.windSpeed : "10-15";
-      const telemetrySource = buoyData ? buoyData.source : "LOCAL STAGING GRID";
+      const telemetrySource = buoyData ? buoyData.source : "LOCAL DATA LOOP";
 
-      const badgeColor = telemetrySource.includes("440") ? "#22c55e" : "#64748b";
+      const badgeColor = telemetrySource.includes("44") ? "#22c55e" : "#64748b";
 
       L.popup()
         .setLatLng(e.latlng)
@@ -263,7 +250,6 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, [baselineSst, buoyData]);
 
-  // FLYTO ENGINE HOOK
   useEffect(() => {
     const map = mapRef.current;
     if (map && flyTo) {
@@ -271,7 +257,6 @@ export default function FishingMap({
     }
   }, [flyTo]);
 
-  // LAYER VIEW SYNC CONTROLLER
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -303,7 +288,6 @@ export default function FishingMap({
     }
   }, [showBathy, showSST, showWeather]);
 
-  // SYNC ACCELERATED MARKER ARRAYS
   useEffect(() => {
     const map = mapRef.current;
     if (!map || liveHotspots.length === 0) return;
@@ -325,7 +309,7 @@ export default function FishingMap({
 
       circle.bindPopup(`
         <div style="color:#cbd5e1;font-size:12px;min-width:210px;font-family:monospace;">
-          <span style="color:${color};font-weight:700;font-size:13px;display:block;margin-bottom:3px">${h.title}</span>
+          <b style="color:${color};font-weight:700;font-size:13px;display:block;margin-bottom:3px">${h.title}</b>
           <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${(h.sstTemp + sstOffset).toFixed(1)}°F</strong> &nbsp;&nbsp;${breakVal}</div>
           <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
           <div style="margin-bottom:4px;display:flex;flex-wrap:wrap;gap:2px;">${speciesTags}</div>
