@@ -1,7 +1,6 @@
 import { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 
-// High-Availability Cascade Array for the Mid-Atlantic Canyons Run
 const BUOY_STATIONS = [
   { id: "44066", name: "Texas Tower #4 (75nm E of OC)" }, 
   { id: "44009", name: "Delaware Bay Entrance (38nm ESE of OC)" },
@@ -11,7 +10,6 @@ const BUOY_STATIONS = [
 const NWS_GRID_URL = "https://api.weather.gov/gridpoints/AKQ/99,81/forecast";
 const KV_TABLE = "kv_store_8db09b0a";
 
-// Core anchors for regional canyon processing bounds
 const CANYON_HOTSPOTS = [
   { id: "poormans-n", name: "Poormans North Wall", lat: 38.01, lng: -74.10, baseScore: 70 },
   { id: "poormans-s", name: "Poormans Bailer Hole", lat: 37.88, lng: -74.15, baseScore: 65 },
@@ -20,7 +18,6 @@ const CANYON_HOTSPOTS = [
   { id: "baltimore-s", name: "Baltimore Pocket", lat: 38.18, lng: -73.98, baseScore: 60 }
 ];
 
-// Initialize Supabase natively inside the serverless layer
 const supabaseUrl = process.env.SUPABASE_URL || "";
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || "";
 const supabase = createClient(supabaseUrl, supabaseKey);
@@ -38,7 +35,8 @@ function degToCompass(deg: number): string {
 export const handler: Handler = async (event, context) => {
   const securityHeaders = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "GET, OPTIONS",
     "User-Agent": "TacticalOffshoreCore/3.0 (contact@tacticaloffshore.app)"
   };
 
@@ -46,6 +44,37 @@ export const handler: Handler = async (event, context) => {
     return { statusCode: 200, headers: securityHeaders, body: "" };
   }
 
+  // ── ROUTE SPECIFIC INTERCEPTOR: SERVE NATIVE ACCELERATED SST PNG BLOB ──
+  if (event.queryStringParameters?.fetchSstLayer === "true") {
+    try {
+      // Dynamic temporal mapping to always query the most immediate satellite pass layout available
+      const currentIsoDate = new Date().toISOString().split("T")[0];
+      const fallbackUrl = `https://www.ncei.noaa.gov/erddap/wms/erdBAssta5day/request?service=WMS&version=1.3.0&request=GetMap&layers=erdBAssta5day:sst&styles=boxfill/KT_sst&crs=EPSG:4326&bbox=37.0,-75.5,39.5,-73.0&width=800&height=800&format=image/png&transparent=true&time=${currentIsoDate}T12:00:00Z`;
+
+      const response = await fetch(fallbackUrl, { headers: { "User-Agent": securityHeaders["User-Agent"] } });
+      
+      if (!response.ok) {
+        throw new Error(`NOAA Raster extraction failed with status code ${response.status}`);
+      }
+
+      const buffer = await response.arrayBuffer();
+      return {
+        statusCode: 200,
+        headers: {
+          ...securityHeaders,
+          "Content-Type": "image/png",
+          "Cache-Control": "public, max-age=1800" // Cache visual tiles for 30 minutes to reduce loading times
+        },
+        body: Buffer.from(buffer).toString("base64"),
+        isBase64Encoded: true
+      };
+    } catch (layerErr: any) {
+      console.error("[SST Proxy Crash]:", layerErr);
+      return { statusCode: 500, headers: securityHeaders, body: "Raster channel mapping failure." };
+    }
+  }
+
+  // ── CORE DATA ENGINE CONTINUATION LAYER ─────────────────────────────────
   try {
     let buoyMetrics = {
       stationId: "Offline",
@@ -62,7 +91,6 @@ export const handler: Handler = async (event, context) => {
     let forecastPeriods: any[] = [];
     let buoyParsedSuccessfully = false;
 
-    // 1. Cascading Station Loop Matrix
     for (const station of BUOY_STATIONS) {
       if (buoyParsedSuccessfully) break;
       try {
@@ -119,7 +147,6 @@ export const handler: Handler = async (event, context) => {
       }
     }
 
-    // 2. High-Availability NWS Spatial Grid Processing Loop
     try {
       const forecastRes = await fetch(NWS_GRID_URL, { headers: { "User-Agent": securityHeaders["User-Agent"] } });
       if (forecastRes.ok) {
@@ -143,7 +170,6 @@ export const handler: Handler = async (event, context) => {
       console.warn("Spatial models offline.");
     }
 
-    // 3. Server-Side Hotspot Evaluation Matrix
     const currentWaterTemp = buoyMetrics.waterTempF || 72.4;
     const computedHotspots = CANYON_HOTSPOTS.map((spot) => {
       let tempDelta = 0;
@@ -163,7 +189,6 @@ export const handler: Handler = async (event, context) => {
       };
     });
 
-    // 4. RESTORE DAILY BRIEF SUMMARY DATA DIRECT FROM KV STORAGE
     let dailySummaryText = "";
     try {
       if (supabaseUrl && supabaseKey) {
@@ -182,10 +207,6 @@ export const handler: Handler = async (event, context) => {
     } catch (dbErr) {
       console.warn("Database summary pull deferred:", dbErr);
     }
-
-    // 5. NATIVE HIGH-PERFORMANCE IMAGE OVERLAY EMBED (WMS)
-    // Pulls pre-rendered 800x800 transparent layout blocks from NOAA CoastWatch instead of massive raw numbers.
-    const sstImageUrl = `https://coastwatch.noaa.gov/erddap/wms/noaa_psd_esrl_sst/request?service=WMS&version=1.3.0&request=GetMap&layers=sst&styles=sst_color_bar&crs=EPSG:4326&bbox=37.0,-75.5,39.5,-73.0&width=800&height=800&format=image/png&transparent=true`;
 
     const payload = {
       timestamp: new Date().toISOString(),
@@ -206,8 +227,7 @@ export const handler: Handler = async (event, context) => {
         { periodTitle: "Today", shortSummary: "Mostly Sunny", windVelocity: "Winds variable 10 kt.", seaState: "Seas 2 to 3 ft." }
       ],
       preScoredHotspots: computedHotspots,
-      sstImageOverlay: sstImageUrl,
-      dailySummary: dailySummaryText || "Automated tracking matrix running normally. Morning summary locked in database storage layers."
+      dailySummary: dailySummaryText || "Automated metrics active."
     };
 
     return {
