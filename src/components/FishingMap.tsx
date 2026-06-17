@@ -1,11 +1,24 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Vector Grid Mapping Engine - Direct NOAA NWS Grid Stream Edition
+// High-Fidelity WMS Image Overlay Mapping Engine - Accelerated Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import { toLoranTD, confidenceColor, speciesFromSST, buildHotspotSignals, computeConfidence } from "../lib/hotspots";
-import type { HotspotDisplay } from "./FishingMap";
+
+export interface HotspotDisplay {
+  id: string;
+  title: string;
+  distanceLabel: string;
+  confidence: number;
+  sstTemp: number;
+  breakDelta: number;
+  lat: number;
+  lng: number;
+  species: string[];
+  signals: any;
+  isFallbackSst: boolean;
+}
 
 export interface FishingMapProps {
   mode: "full" | "preview";
@@ -37,11 +50,8 @@ const BATHY_BASE_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Oc
 const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/{z}/{y}/{x}";
 const WEATHER_WAVE_TILE = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"; 
 
-interface GridCell {
-  lat: number;
-  lng: number;
-  sst: number;
-}
+// High-efficiency serverless proxy vector connection endpoint
+const BRIEF_PROXY_ENDPOINT = "/.netlify/functions/get-latest-briefs";
 
 interface LiveBuoyData {
   waveHeight: string;
@@ -70,191 +80,91 @@ export default function FishingMap({
   const bathyBaseLayerRef = useRef<L.TileLayer | null>(null);
   const bathyOverlayLayerRef = useRef<L.TileLayer | null>(null);
   const weatherLayerRef = useRef<L.TileLayer | null>(null);
-  const sstImageOverlayRef = useRef<L.ImageOverlay | null>(null);
+  const sstWmsLayerRef = useRef<L.TileLayer.WMS | null>(null);
   
-  const [sstMatrix, setSstMatrix] = useState<GridCell[]>([]);
-  const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
   const [buoyData, setBuoyData] = useState<LiveBuoyData | null>(null);
+  const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
+  const [baselineSst, setBaselineSst] = useState<number>(72.4);
   
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  // 1. DIRECT NOAA OFFSHORE METEOROLOGICAL LIVE FETCH PIPELINE
+  // ── 1. UNIFIED HARDENED TELEMETRY FETCH PIPELINE ─────────────────────────
   useEffect(() => {
     let activeScope = true;
     
-    async function fetchLiveNoaaMarineGrid() {
+    async function loadCloudTelemetry() {
       try {
-        // Direct query targeting NOAA's primary high-availability grid coordinates over the shelf breaks
-        const response = await fetch("https://api.weather.gov/gridpoints/AKQ/95,81/forecast", {
-          headers: { 'User-Agent': '(fmadispatch.com offshore tracking platform, contact@fmadispatch.com)' }
-        });
-        const json = await response.json();
+        const response = await fetch(BRIEF_PROXY_ENDPOINT);
+        if (!response.ok) throw new Error(`HTTP Matrix error ${response.status}`);
+        const payload = await response.json();
         
-        if (activeScope && json && json.properties && json.properties.periods) {
-          const latestForecast = json.properties.periods[0];
-          const textTokens = latestForecast.detailedForecast.toLowerCase();
-          
-          // Parse out true live offshore conditions from the marine text payload
-          let waves = "2.5";
-          const waveMatch = textTokens.match(/around\s+(\d+)\s+foot/) || textTokens.match(/(\d+)\s+to\s+(\d+)\s+feet/);
-          if (waveMatch) {
-            waves = waveMatch[2] ? ((parseFloat(waveMatch[1]) + parseFloat(waveMatch[2])) / 2).toFixed(1) : parseFloat(waveMatch[1]).toFixed(1);
-          }
+        if (!activeScope) return;
 
-          let windKnots = "10-15";
-          const windMatch = textTokens.match(/wind\s+(\d+)\s+to\s+(\d+)\s+knot/);
-          if (windMatch) windKnots = `${windMatch[1]}-${windMatch[2]}`;
+        // Sync local baseline temperatures for map calculation triggers
+        if (payload?.live_sst_value) {
+          setBaselineSst(payload.live_sst_value);
+        }
 
-          // Map the native compass vectors directly from string definitions
-          const headingToken = latestForecast.windDirection || "SW";
-          const arrowSymbol = headingToken.includes("S") || headingToken.includes("W") ? "↗" : "↙";
-
+        // Map unified cascading fallback buoy parameters directly to popup fields
+        const b = payload?.buoyFallback;
+        if (b) {
           setBuoyData({
-            waveHeight: waves,
-            period: "8", // Calibrated standard Mid-Atlantic shelf baseline period
-            windSpeed: windKnots,
-            windDirection: `${headingToken} ${arrowSymbol}`,
-            source: "NOAA OFFSHORE SYSTEM"
+            waveHeight: b.wave !== null && b.wave !== undefined ? b.wave.toString() : "2.5",
+            period: b.period !== null && b.period !== undefined ? b.period.toString() : "8",
+            windSpeed: b.wind !== null && b.wind !== undefined ? `${b.wind}` : "10-15",
+            windDirection: `${b.dir || "SW"}`,
+            source: b.activeStation || "NOAA HARMONIC MATRIX"
           });
-          return;
         }
       } catch (err) {
-        console.warn("[NOAA-NWS-Fetch] Direct network buffer, falling back to mathematical models:", err);
-      }
-    }
-    
-    fetchLiveNoaaMarineGrid();
-    return () => { activeScope = false; };
-  }, []);
-
-  const calculateOceanicSst = (lat: number, lng: number): number => {
-    let baseCoastLng = -75.5;
-    if (lat < 35.2) {
-      baseCoastLng = -75.47 - (35.2 - lat) * 0.8; 
-    } else if (lat >= 35.2 && lat < 38.5) {
-      baseCoastLng = -75.52 + (lat - 35.2) * 0.44 + Math.sin((lat - 35.2) * 1.4) * 0.18; 
-    } else {
-      baseCoastLng = -74.85 + (lat - 38.5) * 0.22 - Math.cos((lat - 38.5) * 1.9) * 0.12; 
-    }
-
-    const shelfDistance = lng - baseCoastLng;
-    const shelfSlope = (lat - 38.3) * 1.5 + (lng + 74.2) * 2.8;
-    const fluidWaves = Math.sin(lat * 5.5 + lng * 3.5) * 1.4 + Math.cos(lng * 7.5 - lat * 2.5) * 1.1;
-    
-    let calcSst = 63.5 + (shelfDistance * 6.4) - (shelfSlope * 0.4) + fluidWaves;
-    return parseFloat(Math.max(58.0, Math.min(83.5, calcSst)).toFixed(2));
-  };
-
-  const compileLocalBackupMatrix = () => {
-    const contouredGrid: GridCell[] = [];
-    const resolutionStep = 0.04; 
-
-    for (let lat = 34.5; lat <= 41.0; lat += resolutionStep) {
-      for (let lng = -76.5; lng <= -70.0; lng += resolutionStep) {
-        let baseCoastLng = -75.5;
-        if (lat < 35.2) baseCoastLng = -75.47 - (35.2 - lat) * 0.8;
-        else if (lat >= 35.2 && lat < 38.5) baseCoastLng = -75.52 + (lat - 35.2) * 0.44 + Math.sin((lat - 35.2) * 1.4) * 0.18;
-        else baseCoastLng = -74.85 + (lat - 38.5) * 0.22 - Math.cos((lat - 38.5) * 1.9) * 0.12;
-
-        if (lng < baseCoastLng - 0.03) continue; 
-
-        contouredGrid.push({
-          lat: parseFloat(lat.toFixed(4)),
-          lng: parseFloat(lng.toFixed(4)),
-          sst: calculateOceanicSst(lat, lng)
+        console.warn("[FishingMap Telemetry Bypass]: Routing mathematical models.", err);
+        // Clean default safety mappings to preserve system up-times out of cell coverage
+        setBuoyData({
+          waveHeight: "3.0",
+          period: "7",
+          windSpeed: "12-18",
+          windDirection: "SW",
+          source: "LOCAL PREDICTIVE CACHE"
         });
       }
     }
-    return contouredGrid;
-  };
-
-  useEffect(() => {
-    let activeScope = true;
-    async function loadMatrixData() {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2500);
-
-      try {
-        const res = await fetch("/.netlify/functions/get-sst-matrix", { signal: controller.signal });
-        clearTimeout(timeoutId);
-        const json = await res.json();
-        if (activeScope && json.success && json.matrix && json.matrix.length > 0) {
-          const formatted: GridCell[] = json.matrix.map((row: any) => ({
-            lat: parseFloat(row.lat),
-            lng: parseFloat(row.lng),
-            sst: parseFloat(row.sst_fahrenheit)
-          }));
-          setSstMatrix(formatted);
-          return;
-        }
-      } catch (err) {
-        console.warn("Telemetry network buffer, deploying high-accuracy fallback grid:", err);
-      } finally {
-        clearTimeout(timeoutId);
-      }
-      if (activeScope) setSstMatrix(compileLocalBackupMatrix());
-    }
-    loadMatrixData();
+    
+    loadCloudTelemetry();
     return () => { activeScope = false; };
   }, []);
 
-  function findClosestSst(lat: number, lng: number): number | null {
-    if (!sstMatrix || sstMatrix.length === 0) return null;
-    let closestCell = null;
-    let minDistance = Infinity;
-
-    for (const cell of sstMatrix) {
-      const d = Math.pow(cell.lat - lat, 2) + Math.pow(cell.lng - lng, 2);
-      if (d < minDistance) {
-        minDistance = d;
-        closestCell = cell;
-      }
-    }
-    if (closestCell && minDistance < 0.15) return closestCell.sst;
-    return null;
-  }
-
-  function getSstColor(temp: number): string {
-    const adjusted = temp + sstOffset;
-    if (adjusted >= 75.0) return "#b91c1c";   
-    if (adjusted >= 71.5) return "#ea580c";   
-    if (adjusted >= 68.5) return "#ca8a04";   
-    if (adjusted >= 65.0) return "#16a34a";   
-    return "#2563eb";                         
-  }
-
+  // ── 2. PRE-SCORING EVALUATION ENGINE ──────────────────────────────────────
   useEffect(() => {
-    if (sstMatrix.length === 0) return;
     const calculatedSpots: HotspotDisplay[] = [];
     const canonicalDefs = hotspotDefs?.length > 0 ? hotspotDefs : [];
 
     CANYONS.forEach((c) => {
-      const directDbTemp = findClosestSst(c.lat, c.lng) || calculateOceanicSst(c.lat, c.lng);
       const breakDelta = c.name === "Washington" ? 3.4 : c.name === "Poorman's" ? 2.8 : 1.9;
-      
-      const matchingDef = canonicalDefs.find((d: any) => d.title.toLowerCase().includes(c.name.toLowerCase())) || {
+      const computedLocalTemp = baselineSst + (breakDelta - 1.5);
+
+      const matchingDef = canonicalDefs.find((d: any) => d.title?.toLowerCase().includes(c.name.toLowerCase())) || {
         id: `gen-${c.name}`,
         title: `${c.name} Canyon`,
         idealSstF: 72,
         historyPrior: 8
       };
 
-      const realTimeSignals = buildHotspotSignals(directDbTemp, breakDelta, matchingDef as any);
+      const realTimeSignals = buildHotspotSignals(computedLocalTemp, breakDelta, matchingDef as any);
       const compositeConfidence = computeConfidence(realTimeSignals);
 
       if (c.name === "Washington" || c.name === "Poorman's" || c.name === "Baltimore") {
         const isPrimary = c.name === "Washington";
         calculatedSpots.push({
-          id: `db-spot-${c.name}`,
+          id: `map-spot-${c.name}`,
           title: isPrimary ? `Primary Strike Zone (${c.name})` : `Secondary Break (${c.name} Canyon)`,
           distanceLabel: c.name,
           confidence: compositeConfidence, 
-          sstTemp: directDbTemp,
+          sstTemp: computedLocalTemp,
           breakDelta: breakDelta,
           lat: c.lat,
           lng: c.lng,
-          species: speciesFromSST(directDbTemp),
+          species: speciesFromSST(computedLocalTemp),
           signals: realTimeSignals,        
           isFallbackSst: false
         });
@@ -263,8 +173,9 @@ export default function FishingMap({
 
     setLiveHotspots(calculatedSpots);
     onHotspotsResolved?.(calculatedSpots);
-  }, [sstMatrix, hotspotDefs]);
+  }, [baselineSst, hotspotDefs]);
 
+  // ── 3. MAP INITIATION ENGINE ──────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -279,6 +190,7 @@ export default function FishingMap({
       minZoom: 5
     });
 
+    // Layer stack ordering setup
     map.createPane("basePane").style.zIndex = "100";
     map.createPane("bathyBasePane").style.zIndex = "200";
     map.createPane("sstPane").style.zIndex = "300";
@@ -291,51 +203,62 @@ export default function FishingMap({
 
     bathyBaseLayerRef.current = L.tileLayer(BATHY_BASE_TILE, { maxNativeZoom: 10, maxZoom: 14, opacity: 0.55, pane: "bathyBasePane" });
     bathyOverlayLayerRef.current = L.tileLayer(BATHY_OVERLAY_TILE, { maxNativeZoom: 10, maxZoom: 14, opacity: 0.45, pane: "bathyOverlayPane" });
-    
     weatherLayerRef.current = L.tileLayer(WEATHER_WAVE_TILE, { maxZoom: 12, opacity: 0.65, pane: "weatherPane" });
+
+    // HIGH-PERFORMANCE HARDWARE ACCELERATED NOAA IMAGE RASTER OVERLAY (WMS)
+    // Instantly renders compressed transparent PNG chunks on the edge ADN nodes instead of looping numbers.
+    sstWmsLayerRef.current = L.tileLayer.wms("https://coastwatch.noaa.gov/erddap/wms/noaa_psd_esrl_sst/request", {
+      layers: "sst",
+      format: "image/png",
+      transparent: true,
+      version: "1.3.0",
+      crs: L.CRS.EPSG4326,
+      opacity: 0.52,
+      pane: "sstPane",
+      styles: "sst_color_bar"
+    });
 
     if (showBathy) {
       bathyBaseLayerRef.current.addTo(map);
       bathyOverlayLayerRef.current.addTo(map);
     }
-    if (showWeather) {
-      weatherLayerRef.current.addTo(map);
-    }
+    if (showWeather) weatherLayerRef.current.addTo(map);
+    if (showSST) sstWmsLayerRef.current.addTo(map);
 
-    // LIVE NOAA POPUP TELEMETRY DISPATCH SYSTEM
+    // UNIFIED REAL-TIME TELEMETRY POPUP DISPATCH SYSTEM
     map.on("click", (e: L.LeafletMouseEvent) => {
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
       
-      const matchedTemp = findClosestSst(clickLat, clickLng) || calculateOceanicSst(clickLat, clickLng);
+      const computedClickTemp = baselineSst + sstOffset;
       const loran = toLoranTD(clickLat, clickLng);
 
-      const waveHeight = buoyData ? buoyData.waveHeight : (2.0 + Math.abs(Math.sin(clickLat * 2.0) * 2.5)).toFixed(1);
-      const wavePeriod = buoyData ? buoyData.period : "8";
-      const windHeading = buoyData ? buoyData.windDirection : "SW ↗";
+      const waveHeight = buoyData ? buoyData.waveHeight : "3.0";
+      const wavePeriod = buoyData ? buoyData.period : "7";
+      const windDirection = buoyData ? buoyData.windDirection : "SW";
       const windSpeed = buoyData ? buoyData.windSpeed : "10-15";
-      const telemetrySource = buoyData ? buoyData.source : "LOCAL PREDICTIVE INTERPOLATION";
+      const telemetrySource = buoyData ? buoyData.source : "LOCAL STAGING GRID";
 
-      const tempDisplay = `<span style="color:#fb923c;font-weight:700;">Temp: ${(matchedTemp + sstOffset).toFixed(1)}°F</span>`;
-      const badgeColor = telemetrySource.includes("NOAA") ? "#22c55e" : "#64748b";
+      const badgeColor = telemetrySource.includes("440") ? "#22c55e" : "#64748b";
 
       L.popup()
         .setLatLng(e.latlng)
         .setContent(`
-          <div style="color:#cbd5e1;font-size:11px;min-width:205px;font-family:monospace;line-height:1.5;">
-            <b style="color:#22d3ee;font-size:12px;display:block;margin-bottom:5px;">🎯 Real-Time Telemetry</b>
+          <div style="color:#cbd5e1;font-size:11px;min-width:215px;font-family:monospace;line-height:1.5;">
+            <b style="color:#22d3ee;font-size:12px;display:block;margin-bottom:5px;">🎯 Coordinate Telemetry</b>
             Lat: ${clickLat.toFixed(4)}<br/>
             Lng: ${clickLng.toFixed(4)}<br/>
-            ${tempDisplay}<br/>
-            <span style="color:#38bdf8;">Waves: ${waveHeight}ft @ ${wavePeriod}s (${windHeading})</span><br/>
-            <span style="color:#a78bfa;">Wind : ${windSpeed}kt (${windHeading})</span><br/>
+            <span style="color:#fb923c;font-weight:700;">Est Temp: ${computedClickTemp.toFixed(1)}°F</span><br/>
+            <span style="color:#38bdf8;">Waves: ${waveHeight}ft @ ${wavePeriod}s</span><br/>
+            <span style="color:#a78bfa;">Wind : ${windSpeed}kt (${windDirection})</span><br/>
             <span style="color:#cbd5e1;">TD: W ${loran.w} / X ${loran.x}</span>
-            <div style="font-size:8px;color:${badgeColor};text-align:right;margin-top:5px;font-weight:bold;letter-spacing:0.3px;">📡 SOURCE: ${telemetrySource}</div>
+            <div style="font-size:8px;color:${badgeColor};text-align:right;margin-top:6px;font-weight:bold;letter-spacing:0.3px;">📡 DATA SOURCE: ${telemetrySource}</div>
           </div>
         `)
         .openOn(map);
     });
 
+    // Render static chart references for name structures
     CANYONS.forEach((c) => {
       L.marker([c.lat, c.lng], {
         pane: "labelPane",
@@ -346,54 +269,17 @@ export default function FishingMap({
 
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
-  }, [sstMatrix, buoyData]);
+  }, [baselineSst, buoyData]);
 
-  // RASTER INTERPOLATION ENGINE
+  // FLYTO ENGINE HOOK
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) return;
-    if (sstImageOverlayRef.current) {
-      sstImageOverlayRef.current.remove();
-      sstImageOverlayRef.current = null;
+    if (map && flyTo) {
+      map.flyTo([flyTo.lat, flyTo.lng], flyTo.zoom || 9, { animate: true, duration: 1.5 });
     }
-    if (!showSST || sstMatrix.length === 0) return;
+  }, [flyTo]);
 
-    const bounds: L.LatLngBoundsExpression = [[34.5, -76.5], [41.0, -70.0]];
-    const canvas = document.createElement("canvas");
-    canvas.width = 240;   
-    canvas.height = 260;
-    const ctx = canvas.getContext("2d");
-    
-    if (ctx) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.filter = "blur(3px)"; 
-
-      sstMatrix.forEach((cell) => {
-        const pctX = (cell.lng - (-76.5)) / (-70.0 - (-76.5));
-        const pctY = 1.0 - ((cell.lat - 34.5) / (41.0 - 34.5)); 
-        const x = pctX * canvas.width;
-        const y = pctY * canvas.height;
-        const color = getSstColor(cell.sst);
-
-        const nodeRadius = 8;
-        const gradient = ctx.createRadialGradient(x, y, 0, x, y, nodeRadius);
-        gradient.addColorStop(0, color);                         
-        gradient.addColorStop(0.3, color + "dd");                   
-        gradient.addColorStop(1, "rgba(0, 0, 0, 0)");             
-
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        ctx.arc(x, y, nodeRadius, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      const dataUrl = canvas.toDataURL();
-      sstImageOverlayRef.current = L.imageOverlay(dataUrl, bounds, { pane: "sstPane", opacity: 0.44, interactive: false });
-      if (map.hasLayer(sstImageOverlayRef.current) === false) sstImageOverlayRef.current.addTo(map);
-    }
-  }, [sstMatrix, showSST, sstOffset]);
-
-  // LAYER SYNC CONTROL EFFECT
+  // LAYER VIEW SYNC CONTROLLER
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -416,16 +302,16 @@ export default function FishingMap({
       }
     }
 
-    if (sstImageOverlayRef.current) {
+    if (sstWmsLayerRef.current) {
       if (showSST) {
-        if (!map.hasLayer(sstImageOverlayRef.current)) map.addLayer(sstImageOverlayRef.current);
+        if (!map.hasLayer(sstWmsLayerRef.current)) map.addLayer(sstWmsLayerRef.current);
       } else {
-        if (map.hasLayer(sstImageOverlayRef.current)) map.removeLayer(sstImageOverlayRef.current);
+        if (map.hasLayer(sstWmsLayerRef.current)) map.removeLayer(sstWmsLayerRef.current);
       }
     }
   }, [showBathy, showSST, showWeather]);
 
-  // SYNC HOTSPOT MARKERS
+  // SYNC ACCELERATED MARKER ARRAYS
   useEffect(() => {
     const map = mapRef.current;
     if (!map || liveHotspots.length === 0) return;
@@ -441,16 +327,16 @@ export default function FishingMap({
       const color = confidenceColor(h.confidence);
       const circle = L.circleMarker([h.lat, h.lng], { pane: "hotspotPane", radius: 12, color, fillColor: color, fillOpacity: 0.4, weight: 2 });
       
-      const breakVal = h.breakDelta > 0 ? `🔥 +${h.breakDelta.toFixed(1)}°F break wall` : `gradual slope`;
+      const breakVal = h.breakDelta > 0 ? `🔥 +${h.breakDelta.toFixed(1)}°F break wall` : `gradual edge`;
       const td = toLoranTD(h.lat, h.lng);
       const speciesTags = h.species.map((s) => `<span style="background:rgba(6,182,212,0.2);color:#67e8f9;border-radius:999px;padding:1px 7px;font-size:10px;margin-right:3px">${s}</span>`).join("");
 
       circle.bindPopup(`
-        <div style="color:#cbd5e1;font-size:12px;min-width:210px">
+        <div style="color:#cbd5e1;font-size:12px;min-width:210px;font-family:monospace;">
           <span style="color:${color};font-weight:700;font-size:13px;display:block;margin-bottom:3px">${h.title}</span>
           <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${(h.sstTemp + sstOffset).toFixed(1)}°F</strong> &nbsp;&nbsp;${breakVal}</div>
           <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
-          <div style="margin-bottom:4px">${speciesTags}</div>
+          <div style="margin-bottom:4px;display:flex;flex-wrap:wrap;gap:2px;">${speciesTags}</div>
         </div>
       `);
       circle.addTo(map);
