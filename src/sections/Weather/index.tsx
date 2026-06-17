@@ -24,7 +24,7 @@ const BUOY_LAT = 38.461;
 const BUOY_LNG = -74.703;
 const BUOY_URL = `https://www.ndbc.noaa.gov/station_page.php?station=44066`;
 
-const SERVER_PROXY_URL = `/.netlify/functions/get-latest-brief`;
+const SERVER_PROXY_URL = `/.netlify/functions/get-latest-briefs`;
 
 const WIND_GO = 20; 
 const WIND_MARG = 30;
@@ -41,6 +41,7 @@ interface BuoyData {
   pressureInHg: number | null;
   pressTrend: string;
   timestamp: string;
+  activeStation?: string;
 }
 
 interface ForecastPeriod {
@@ -56,6 +57,7 @@ type StatusType = "GO" | "MARGINAL" | "NO-GO" | "UNKNOWN";
 export default function Weather() {
   const [buoy, setBuoy] = useState<BuoyData | null>(null);
   const [forecast, setForecast] = useState<ForecastPeriod[]>([]);
+  const [dailySummary, setDailySummary] = useState<string>("");
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string>("");
   const [expanded, setExpanded] = useState(true);
@@ -99,12 +101,17 @@ export default function Weather() {
           waterTempF: b.waterTemp || Number(payload?.live_sst_value) || 72.4,
           pressureInHg: b.pressure,
           pressTrend: b.trend || "Steady",
-          timestamp: b.ts || "Station Active"
+          timestamp: b.ts || "Station Active",
+          activeStation: b.activeStation
         });
       }
 
       if (payload?.forecast) {
         setForecast(payload.forecast);
+      }
+
+      if (payload?.dailySummary) {
+        setDailySummary(payload.dailySummary);
       }
       
       setState("ok");
@@ -171,16 +178,16 @@ export default function Weather() {
         <div className="flex items-start gap-1.5 text-xs text-slate-400">
           <Radio className="w-3 h-3 flex-shrink-0 text-cyan-500 mt-0.5" />
           <span className="leading-relaxed">
-            Deep Ledge Anchor{" "}
-            <a href={BUOY_URL} target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline break-all">
-              {BUOY_NAME}
-            </a>
+            Active Station:{" "}
+            <span className="text-cyan-400 font-medium">
+              {buoy?.activeStation || BUOY_NAME}
+            </span>
             {buoy?.timestamp && <span className="text-slate-500"> · obs {buoy.timestamp}</span>}
           </span>
         </div>
         <div className="flex items-center gap-1.5 text-xs text-slate-500">
           <MapPin className="w-3 h-3 flex-shrink-0" />
-          <span>{BUOY_LAT}°N {Math.abs(BUOY_LNG)}°W · 1000FM Slope Boundary</span>
+          <span>Tracking Core Canyons Route · 1000FM Slope Boundary</span>
         </div>
       </div>
 
@@ -191,7 +198,22 @@ export default function Weather() {
         </div>
       )}
 
-      {/* Safe Condition Assessment Display */}
+      {/* ── RESTORED DAILY DISPATCH SUMMARY PANEL ────────────────────────── */}
+      {dailySummary && state === "ok" && (
+        <div className="bg-slate-800/90 rounded-xl border border-amber-500/30 overflow-hidden shadow-lg">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-700 bg-amber-500/10">
+            <FileText className="w-4 h-4 text-amber-400" />
+            <span className="text-sm font-semibold text-white">Morning Dispatch Summary</span>
+          </div>
+          <div className="p-4 bg-slate-900/20 max-h-[250px] overflow-y-auto">
+            <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap font-mono">
+              {dailySummary}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Operational Safety Assessment Display */}
       <div
         className={`rounded-xl border cursor-pointer transition-all ${
           status === "GO" ? "bg-emerald-500/20 border-emerald-500/50" :
