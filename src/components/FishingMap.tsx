@@ -200,8 +200,6 @@ export default function FishingMap({
     weatherLayerRef.current = L.tileLayer(WEATHER_WAVE_TILE, { maxZoom: 12, opacity: 0.65, pane: "weatherPane" });
 
     // ── HARDENED HIGH-PERFORMANCE CLIENT GRADIENT OVERLAY ──────────────────
-    // Generates a clean, transparent visual thermal layer locally on an isolated canvas context.
-    // Completely uncouples the app from file naming issues and cross-origin blocks.
     const sstVisualBounds: L.LatLngBoundsExpression = [[37.0, -75.5], [39.5, -73.0]];
     const offscreenCanvas = document.createElement("canvas");
     offscreenCanvas.width = 400;
@@ -211,25 +209,22 @@ export default function FishingMap({
     if (ctx) {
       ctx.clearRect(0, 0, 400, 400);
       
-      // Calculate active thermal breaks using your real-time baseline numbers
       const adjustedTemp = baselineSst + sstOffset;
       
-      // Select appropriate color mapping scales for different temperature zones
-      let gradientStartColor = "rgba(37, 99, 235, 0.45)";  // Blue (Cooler water)
-      let gradientMidColor = "rgba(22, 163, 74, 0.50)";    // Green
-      let gradientEndColor = "rgba(234, 88, 12, 0.55)";    // Warm Gulf Stream edge
+      let gradientStartColor = "rgba(37, 99, 235, 0.45)";  
+      let gradientMidColor = "rgba(22, 163, 74, 0.50)";    
+      let gradientEndColor = "rgba(234, 88, 12, 0.55)";    
       
       if (adjustedTemp >= 74.0) {
         gradientStartColor = "rgba(22, 163, 74, 0.40)";
         gradientMidColor = "rgba(234, 88, 12, 0.50)";
-        gradientEndColor = "rgba(185, 28, 28, 0.60)";      // Crimson (Hot break wall)
+        gradientEndColor = "rgba(185, 28, 28, 0.60)";      
       } else if (adjustedTemp < 68.0) {
         gradientStartColor = "rgba(29, 78, 216, 0.50)";
         gradientMidColor = "rgba(59, 130, 246, 0.40)";
         gradientEndColor = "rgba(22, 163, 74, 0.45)";
       }
 
-      // Draw standard Mid-Atlantic canyon shelf gradient contours
       const linearGradient = ctx.createLinearGradient(100, 350, 300, 50);
       linearGradient.addColorStop(0, gradientStartColor);
       linearGradient.addColorStop(0.45, gradientMidColor);
@@ -238,7 +233,6 @@ export default function FishingMap({
       ctx.fillStyle = linearGradient;
       ctx.fillRect(0, 0, 400, 400);
 
-      // Apply blur to match true satellite transition zones
       ctx.filter = "blur(12px)";
       
       const thermalImageString = offscreenCanvas.toDataURL();
@@ -362,4 +356,24 @@ export default function FishingMap({
 
       circle.bindPopup(`
         <div style="color:#cbd5e1;font-size:12px;min-width:210px;font-family:monospace;">
-          <span style="color:${color};font-weight:700;font-size:13px;display:block;margin-bottom:
+          <b style="color:${color};font-weight:700;font-size:13px;display:block;margin-bottom:3px">${h.title}</b>
+          <div style="margin-bottom:5px">🌡 <strong style="color:#fb923c">${(h.sstTemp + sstOffset).toFixed(1)}°F</strong> &nbsp;&nbsp;${breakVal}</div>
+          <div style="color:#a78bfa;font-size:11px;margin-bottom:5px">📡 LORAN W ${td.w} / X ${td.x} μs</div>
+          <div style="margin-bottom:4px;display:flex;flex-wrap:wrap;gap:2px;">${speciesTags}</div>
+        </div>
+      `);
+      circle.addTo(map);
+      circleMarkersRef.current.set(h.id, circle);
+
+      const label = L.marker([h.lat, h.lng], {
+        pane: "labelPane",
+        interactive: false,
+        icon: L.divIcon({ className: "", html: `<div style="display:flex;align-items:center;gap:3px;white-space:nowrap;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color}"></span><span style="color:#fff;font-size:10px;font-weight:600;text-shadow:0 0 3px #000">${h.distanceLabel} • ${(h.sstTemp + sstOffset).toFixed(1)}°</span></div>`, iconAnchor: [60, -10] })
+      });
+      label.addTo(map);
+      labelMarkersRef.current.set(h.id, label);
+    });
+  }, [liveHotspots, showHotspots, sstOffset]);
+
+  return <div ref={containerRef} className={`w-full h-full ${className}`} />;
+}
