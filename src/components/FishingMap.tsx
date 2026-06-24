@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Non-Blocking Asynchronous Mapping Deck - Leg Plotter Edition
+// High-Fidelity Non-Blocking Asynchronous Mapping Deck - Mode Isolation Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -31,6 +31,7 @@ export interface FishingMapProps {
   sstOffset?: number;
   showBathy?: boolean;
   showWeather?: boolean; 
+  isPlotterArmed?: boolean; // Toggling state definition passed from Parent view container
   flyTo?: { lat: number; lng: number; zoom?: number };
   className?: string;
 }
@@ -54,7 +55,6 @@ const WEATHER_WAVE_TILE = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"
 const TELEMETRY_PROXY = "/.netlify/functions/get-latest-briefs";
 const OC_INLET = { lat: 38.3289, lng: -75.0913 }; 
 
-// Calculates Magnetic Bearing incorporating standard Mid-Atlantic variation (~11.5W)
 function calculateBearingMagnetic(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
   const y = Math.sin(dLng) * Math.cos((lat2 * Math.PI) / 180);
@@ -74,6 +74,7 @@ export default function FishingMap({
   sstOffset = 0,
   showBathy = true,
   showWeather = false, 
+  isPlotterArmed = false,
   flyTo,
   className = "",
 }: FishingMapProps) {
@@ -93,7 +94,6 @@ export default function FishingMap({
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  // Navigation references to clear layers internally
   const navAnchorRef = useRef<L.LatLng | null>(null);
   const navAnchorMarkerRef = useRef<L.Marker | null>(null);
   const navPolylineRef = useRef<L.Polyline | null>(null);
@@ -256,12 +256,21 @@ export default function FishingMap({
     }
   }, [baselineSst, sstOffset, showSST]);
 
-  // ── LAYER HOOK D: AUTOMATIC SELF-CLEARING LEG PLOTTER & TELEMETRY ────────
+  // ── LAYER HOOK D: AUTOMATIC ISOLATED MODE INTERCEPTOR ────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
     map.off("click");
+
+    // Clear active map plotter layers instantly if the master flag is deactivated
+    if (!isPlotterArmed) {
+      if (navPolylineRef.current) map.removeLayer(navPolylineRef.current);
+      if (navAnchorMarkerRef.current) map.removeLayer(navAnchorMarkerRef.current);
+      navPolylineRef.current = null;
+      navAnchorMarkerRef.current = null;
+      navAnchorRef.current = null;
+    }
 
     map.on("click", (e: L.LeafletMouseEvent) => {
       const clickLat = e.latlng.lat;
@@ -280,57 +289,59 @@ export default function FishingMap({
 
       let plotterHtmlLine = "";
 
-      if (navPolylineRef.current && !navAnchorRef.current) {
-        map.removeLayer(navPolylineRef.current);
-        if (navAnchorMarkerRef.current) map.removeLayer(navAnchorMarkerRef.current);
-        navPolylineRef.current = null;
-        navAnchorMarkerRef.current = null;
-      }
+      // Only execute the range-finding math if the compass arm toggle button is active
+      if (isPlotterArmed) {
+        if (navPolylineRef.current && !navAnchorRef.current) {
+          map.removeLayer(navPolylineRef.current);
+          if (navAnchorMarkerRef.current) map.removeLayer(navAnchorMarkerRef.current);
+          navPolylineRef.current = null;
+          navAnchorMarkerRef.current = null;
+        }
 
-      if (!navAnchorRef.current) {
-        navAnchorRef.current = e.latlng;
-        
-        navAnchorMarkerRef.current = L.marker(e.latlng, {
-          icon: L.divIcon({
-            className: "",
-            html: `<div style="display:flex; align-items:center; justify-content:center; width:20px; height:20px; background:rgba(34,211,238,0.2); border:2px solid #22d3ee; border-radius:50%;"><span style="width:4px; height:4px; background:#22d3ee; border-radius:50%; margin:auto;"></span></div>`,
-            iconSize: [20, 20], iconAnchor: [10, 10]
-          })
-        }).addTo(map);
+        if (!navAnchorRef.current) {
+          navAnchorRef.current = e.latlng;
+          navAnchorMarkerRef.current = L.marker(e.latlng, {
+            icon: L.divIcon({
+              className: "",
+              html: `<div style="display:flex; align-items:center; justify-content:center; width:20px; height:20px; background:rgba(34,211,238,0.2); border:2px solid #22d3ee; border-radius:50%;"><span style="width:4px; height:4px; background:#22d3ee; border-radius:50%; margin:auto;"></span></div>`,
+              iconSize: [20, 20], iconAnchor: [10, 10]
+            })
+          }).addTo(map);
 
-        plotterHtmlLine = `
-          <div style="margin-top:5px; padding:4px 6px; background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3); border-radius:6px; color:#22d3ee; text-align:center; font-weight:bold; font-size:10px;">
-            📍 NAV ORIGIN ANCHORED<br/>Tap next location to plot range/heading.
-          </div>`;
-      } else {
-        const start = navAnchorRef.current;
-        const currentLegNm = haversineNm(start.lat, start.lng, clickLat, clickLng);
-        const magneticBearing = calculateBearingMagnetic(start.lat, start.lng, clickLat, clickLng);
+          plotterHtmlLine = `
+            <div style="margin-top:5px; padding:4px 6px; background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3); border-radius:6px; color:#22d3ee; text-align:center; font-weight:bold; font-size:10px;">
+              📍 NAV ORIGIN ANCHORED<br/>Tap next location to plot range/heading.
+            </div>`;
+        } else {
+          const start = navAnchorRef.current;
+          const currentLegNm = haversineNm(start.lat, start.lng, clickLat, clickLng);
+          const magneticBearing = calculateBearingMagnetic(start.lat, start.lng, clickLat, clickLng);
 
-        navPolylineRef.current = L.polyline([start, e.latlng], {
-          color: "#22d3ee", weight: 3, dashArray: "5, 8", pane: "hotspotPane"
-        }).addTo(map);
+          navPolylineRef.current = L.polyline([start, e.latlng], {
+            color: "#22d3ee", weight: 3, dashArray: "5, 8", pane: "hotspotPane"
+          }).addTo(map);
 
-        let destinationStructureText = "Open Ocean Grid";
-        let minCanyonDist = 9999;
-        CANYONS.forEach((c) => {
-          const dist = haversineNm(c.lat, c.lng, clickLat, clickLng);
-          if (dist < minCanyonDist) {
-            minCanyonDist = dist;
-            destinationStructureText = dist < 2.0 ? `${c.name} Canyon Rim` : `${c.name} (${dist.toFixed(1)} NM)`;
-          }
-        });
+          let destinationStructureText = "Open Ocean Grid";
+          let minCanyonDist = 9999;
+          CANYONS.forEach((c) => {
+            const dist = haversineNm(c.lat, c.lng, clickLat, clickLng);
+            if (dist < minCanyonDist) {
+              minCanyonDist = dist;
+              destinationStructureText = dist < 2.0 ? `${c.name} Canyon Rim` : `${c.name} (${dist.toFixed(1)} NM)`;
+            }
+          });
 
-        plotterHtmlLine = `
-          <div style="margin-top:6px; padding:5px; background:rgba(15,23,42,0.85); border:1px solid #22d3ee; border-radius:6px; font-family:monospace;">
-            <b style="color:#22d3ee; display:block; border-bottom:1px solid rgba(34,211,238,0.3); margin-bottom:3px; font-size:11px;">📐 PLOTTED LEG ROUTE</b>
-            To: <span style="color:#fff;">${destinationStructureText}</span><br/>
-            Range: <span style="color:#fff; font-weight:bold;">${currentLegNm.toFixed(1)} NM</span><br/>
-            Heading: <span style="color:#34d399; font-weight:bold;">${magneticBearing.toString().padStart(3, "0")}°M</span>
-            <div style="font-size:8px; color:#94a3b8; text-align:center; margin-top:5px; font-style:italic;">Tap anywhere else to reset and start a new leg.</div>
-          </div>`;
-          
-        navAnchorRef.current = null;
+          plotterHtmlLine = `
+            <div style="margin-top:6px; padding:5px; background:rgba(15,23,42,0.85); border:1px solid #22d3ee; border-radius:6px; font-family:monospace;">
+              <b style="color:#22d3ee; display:block; border-bottom:1px solid rgba(34,211,238,0.3); margin-bottom:3px; font-size:11px;">📐 PLOTTED LEG ROUTE</b>
+              To: <span style="color:#fff;">${destinationStructureText}</span><br/>
+              Range: <span style="color:#fff; font-weight:bold;">${currentLegNm.toFixed(1)} NM</span><br/>
+              Heading: <span style="color:#34d399; font-weight:bold;">${magneticBearing.toString().padStart(3, "0")}°M</span>
+              <div style="font-size:8px; color:#94a3b8; text-align:center; margin-top:5px; font-style:italic;">Tap anywhere else to reset and start a new leg.</div>
+            </div>`;
+            
+          navAnchorRef.current = null;
+        }
       }
 
       const waveHeight = buoyData ? buoyData.waveHeight : "3.0";
@@ -365,7 +376,7 @@ export default function FishingMap({
     });
 
     return () => { map.off("click"); };
-  }, [baselineSst, sstOffset, buoyData]);
+  }, [baselineSst, sstOffset, buoyData, isPlotterArmed]);
 
   // ── LAYER HOOK E: ATOMIC VISIBILITY SYNC CONTROLS ───────────────────────
   useEffect(() => {
