@@ -14,7 +14,8 @@ import {
   AlertTriangle,
   Layers,
   History,
-  Compass
+  Compass,
+  RefreshCw
 } from "lucide-react";
 import FishingMap from "../../components/FishingMap";
 import type { HotspotDisplay } from "../../components/FishingMap";
