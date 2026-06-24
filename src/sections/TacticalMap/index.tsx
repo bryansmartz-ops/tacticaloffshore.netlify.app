@@ -1,359 +1,381 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+// src/sections/TacticalMap/index.tsx
+// High-Fidelity Non-Blocking Tactical Deck - Plotted Mode Controller
+// ──────────────────────────────────────────────────────────────────────────────────────
+
+import { useState, useCallback, useEffect, useMemo } from "react";
 import {
-  Layers,
-  Thermometer,
-  Navigation,
   Target,
-  Clock,
-  Bookmark,
-  BookmarkCheck,
-  Trash2,
-  X,
+  Flame,
+  ThermometerSun,
+  MapPin,
+  Navigation,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  Layers,
+  History,
+  Compass,
+  RefreshCw
 } from "lucide-react";
 import FishingMap from "../../components/FishingMap";
-import { gibsSSTDate, gibsSSTLabel } from "../../lib/erddap";
-import { HOTSPOTS_IN_RANGE, HOTSPOT_DEFS } from "../../lib/hotspots";
-import { supabase } from "../../lib/supabase";
+import type { HotspotDisplay } from "../../components/FishingMap";
+import { getCacheAge, gibsSSTDate } from "../../lib/erddap";
+import {
+  toLoranTD,
+  HOTSPOT_DEFS,
+  HOTSPOTS_IN_RANGE,
+  buildHotspotSignals,
+  computeConfidence,
+  speciesFromSST,
+} from "../../lib/hotspots";
 
-const SST_HISTORY_OFFSETS = [0, 1, 2, 3];
-const KV_TABLE = "kv_store_8db09b0a";
-const SERVER_PROXY_URL = `/.netlify/functions/get-latest-briefs`;
-
-export interface Waypoint {
-  id: string;
-  name: string;
-  lat: number;
-  lng: number;
-  tdW: string;
-  tdY: string; 
-  tdX: string;
-  savedAt: string;
+function getLocalConfidenceColor(score: number): string {
+  if (score >= 80) return "#34d399"; 
+  if (score >= 65) return "#fbbf24"; 
+  return "#f87171"; 
 }
 
 export default function TacticalMap() {
-  const [showSST, setShowSST] = useState(true);
-  const [showBathy, setShowBathy] = useState(true);
-  const [showHotspots, setShowHotspots] = useState(true);
-  const [sstOffset, setSstOffset] = useState(0);
-  const [isAnimating, setIsAnimating] = useState(false);
-  const animIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [showWaypoints, setShowWaypoints] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showMap, setShowMap] = useState(true);
   const [flyTo, setFlyTo] = useState<{ lat: number; lng: number; zoom?: number } | undefined>();
 
-  const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
-  const [wpMutating, setWpMutating] = useState(false);
+  const [showHotspots, setShowHotspots] = useState(true);
+  const [showSST, setShowSST] = useState(true);
+  const [showBathy, setShowBathy] = useState(true);
+  const [showWeather, setShowWeather] = useState(false); 
+  const [sstOffset, setSstOffset] = useState<number>(0); 
+  const [showControls, setShowControls] = useState(false);
+  const [isPlotterArmed, setIsPlotterArmed] = useState(false); 
 
-  // High-performance state hooks
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [isDimensionsReady, setIsDimensionsReady] = useState(false);
-  const [cloudHotspots, setCloudHotspots] = useState<any[]>([]);
-  const [isProcessing, setIsProcessing] = useState(true);
+  const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
+  const [sstDate] = useState<string>(() => gibsSSTDate(3));
+  const [cacheAge, setCacheAge] = useState<number | null>(() => getCacheAge());
+  
+  const [dynamicDefs, setDynamicDefs] = useState<any[]>(() => 
+    HOTSPOTS_IN_RANGE.length > 0 ? [...HOTSPOTS_IN_RANGE] : [...HOTSPOT_DEFS]
+  );
 
-  // ── PRE-COMPUTED TELEMETRY FETCH HOOK ──────────────────────────────────────
-  const fetchCloudMetrics = async () => {
-    try {
-      const res = await fetch(SERVER_PROXY_URL);
-      if (!res.ok) throw new Error(`Proxy HTTP Error ${res.status}`);
-      const payload = await res.json();
-      
-      if (payload?.preScoredHotspots) {
-        // Defer rendering insertion by a single macro-frame to preserve thread animations
-        setTimeout(() => {
-          setCloudHotspots(payload.preScoredHotspots);
-          setIsProcessing(false);
-        }, 50);
-      } else {
-        setCloudHotspots(HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS);
-        setIsProcessing(false);
-      }
-    } catch (err) {
-      console.warn("Proxy telemetry array delayed, using local fallback models.", err);
-      setCloudHotspots(HOTSPOTS_IN_RANGE.length > 0 ? HOTSPOTS_IN_RANGE : HOTSPOT_DEFS);
-      setIsProcessing(false);
-    }
-  };
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(() =>
+    new Set(dynamicDefs.map((h) => h.id))
+  );
 
   useEffect(() => {
-    fetchCloudMetrics();
-  }, [sstOffset]);
+    let activeScope = true;
+    fetch("/.netlify/functions/get-latest-briefs")
+      .then((res) => res.ok ? res.json() : Promise.reject())
+      .then((data) => {
+        if (!activeScope || !data) return;
+        
+        setDynamicDefs((prevDefs) =>
+          prevDefs.map((def) => {
+            if (def.id === "1" && data.primary_lat) {
+              const liveSignals = buildHotspotSignals(data.live_sst_value, data.live_break_delta, {
+                ...def,
+                lat: data.primary_lat,
+                lng: data.primary_lng,
+              });
+              return {
+                ...def,
+                lat: data.primary_lat,
+                lng: data.primary_lng,
+                liveSst: data.live_sst_value,
+                liveBreak: data.live_break_delta,
+                liveConfidence: Math.max(92, computeConfidence(liveSignals)),
+                liveSignals,
+                isPrimaryAI: true,
+              };
+            }
 
-  // Viewport resize tracking safety gate
-  useEffect(() => {
-    const observeTarget = containerRef.current;
-    if (!observeTarget) {
-      setIsDimensionsReady(true);
-      return;
-    }
+            if (def.id === "2" && data.secondary_lat) {
+              const secondarySst = Math.max(60, data.live_sst_value - 1.0);
+              const secondaryBreak = Math.max(0, data.live_break_delta - 0.4);
+              const liveSignals = buildHotspotSignals(secondarySst, secondaryBreak, {
+                ...def,
+                lat: data.secondary_lat,
+                lng: data.secondary_lng,
+              });
+              return {
+                ...def,
+                lat: data.secondary_lat,
+                lng: data.secondary_lng,
+                liveSst: secondarySst,
+                liveBreak: secondaryBreak,
+                liveConfidence: Math.max(86, computeConfidence(liveSignals)),
+                liveSignals,
+                isSecondaryAI: true,
+              };
+            }
+            return def;
+          })
+        );
+      })
+      .catch((err) => console.warn("[Tactical Deck Container] Telemetry standby active.", err));
 
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (let entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (width > 20 && height > 20) {
-          setIsDimensionsReady(true);
+    return () => { activeScope = false; };
+  }, []);
+
+  const handleHotspotsResolved = useCallback((hotspots: HotspotDisplay[]) => {
+    setLiveHotspots((prev) => {
+      const matchFound = hotspots.some(h => {
+        const existing = prev.find(p => p.id === h.id);
+        return !existing || existing.sstTemp !== h.sstTemp || existing.confidence !== h.confidence;
+      });
+      if (!matchFound && prev.length === hotspots.length) return prev;
+
+      return hotspots.map((satHot) => {
+        const match = dynamicDefs.find((d) => d.id === satHot.id);
+        if (match && match.liveSst) {
+          return {
+            ...satHot,
+            lat: match.lat,
+            lng: match.lng,
+            sstTemp: match.liveSst,
+            breakDelta: match.liveBreak,
+            confidence: match.liveConfidence,
+            signals: match.liveSignals,
+            species: speciesFromSST(match.liveSst),
+          };
         }
-      }
+        return satHot;
+      });
     });
 
-    resizeObserver.observe(observeTarget);
-    return () => {
-      if (observeTarget) resizeObserver.unobserve(observeTarget);
-      resizeObserver.disconnect();
-    };
-  }, []);
+    setLoadingIds((prev) => prev.size === 0 ? prev : new Set()); 
+    setCacheAge(getCacheAge());
+  }, [dynamicDefs]);
 
-  // Sync Waypoints from Supabase
-  const fetchWaypoints = async () => {
-    try {
-      const { data, error } = await supabase
-        .from(KV_TABLE)
-        .select("value")
-        .like("key", "waypoint:%");
+  const handleHotspotClick = useCallback((id: string) => {
+    setSelectedId((prev) => (prev === id ? null : id));
+    const h = dynamicDefs.find((x) => x.id === id) ?? liveHotspots.find((x) => x.id === id);
+    if (h) setFlyTo({ lat: h.lat, lng: h.lng, zoom: 9 });
+  }, [dynamicDefs, liveHotspots]);
 
-      if (error) throw error;
-      if (data) {
-        const parsedWps = data.map((row: any) => row.value as Waypoint);
-        parsedWps.sort((a, b) => new Date(b.savedAt).getTime() - new Date(a.savedAt).getTime());
-        setWaypoints(parsedWps);
-      }
-    } catch (err) {
-      console.error("[Waypoint Sync Failure]:", err);
+  const fetchesDone = loadingIds.size === 0;
+  const allSatelliteUnavailable = fetchesDone && liveHotspots.length === 0;
+
+  const displayHotspots = useMemo(() => {
+    if (fetchesDone) {
+      return [...liveHotspots].sort((a, b) => b.confidence - a.confidence);
     }
-  };
-
-  useEffect(() => {
-    fetchWaypoints();
-  }, []);
-
-  const handleSaveWaypoint = useCallback(
-    async (name: string, lat: number, lng: number, tdW: string, tdX: string) => {
-      setWpMutating(true);
-      try {
-        const id = Math.random().toString(36).substring(2, 9).toUpperCase();
-        const newWp: Waypoint = {
-          id,
-          name: name.trim() || `Mark-${id}`,
-          lat,
-          lng,
-          tdW,
-          tdY: "", 
-          tdX,
-          savedAt: new Date().toISOString(),
-        };
-
-        const { error } = await supabase
-          .from(KV_TABLE)
-          .insert([{ key: `waypoint:${id}`, value: newWp }]);
-
-        if (error) throw error;
-        await fetchWaypoints();
-      } catch (err) {
-        console.error("[Waypoint Save Failure]:", err);
-      } finally {
-        setWpMutating(false);
-      }
-    },
-    []
-  );
-
-  const deleteWaypoint = useCallback(
-    async (id: string) => {
-      setWpMutating(true);
-      try {
-        const { error } = await supabase
-          .from(KV_TABLE)
-          .delete()
-          .eq("key", `waypoint:${id}`);
-
-        if (error) throw error;
-        await fetchWaypoints();
-      } catch (err) {
-        console.error("[Waypoint Deletion Failure]:", err);
-      } finally {
-        setWpMutating(false);
-      }
-    },
-    []
-  );
-
-  // Animation frame loop
-  useEffect(() => {
-    if (isAnimating) {
-      if (animIntervalRef.current) clearInterval(animIntervalRef.current);
-      animIntervalRef.current = setInterval(() => {
-        setSstOffset((prev) => (prev + 1) % SST_HISTORY_OFFSETS.length);
-      }, 1200);
-    } else {
-      if (animIntervalRef.current) {
-        clearInterval(animIntervalRef.current);
-        animIntervalRef.current = null;
-      }
-    }
-    return () => {
-      if (animIntervalRef.current) {
-        clearInterval(animIntervalRef.current);
-        animIntervalRef.current = null;
-      }
-    };
-  }, [isAnimating]);
+    return dynamicDefs.map((h) => ({
+      id: h.id,
+      title: h.title,
+      distanceLabel: h.distanceLabel,
+      confidence: h.liveConfidence ?? 50,
+      sstTemp: h.liveSst ?? h.fallbackSstF,
+      breakDelta: h.liveBreak ?? 0,
+      lat: h.lat,
+      lng: h.lng,
+      species: h.liveSst ? speciesFromSST(h.liveSst) : [],
+      isFallbackSst: !h.liveSst,
+      signals: h.liveSignals ?? {
+        sstScore: 0, sstBreakScore: 0, chloroScore: 0, altimetryScore: 0, historyReportsScore: 0,
+      },
+    }));
+  }, [fetchesDone, liveHotspots, dynamicDefs]);
 
   return (
-    <div ref={containerRef} className="h-[calc(100vh-8rem)] relative w-full overflow-hidden bg-slate-950">
-      
-      {/* Structural Thread Verification Gateway */}
-      {isDimensionsReady && !isProcessing ? (
+    <div className="flex flex-col h-[calc(100vh-8rem)] overflow-hidden bg-slate-950">
+      <div className={`relative transition-all duration-300 flex-shrink-0 ${showMap ? "h-[45%]" : "h-0 overflow-hidden"}`}>
         <FishingMap
           mode="full"
-          hotspotDefs={cloudHotspots}
+          hotspotDefs={dynamicDefs}
+          showHotspots={showHotspots}
           showSST={showSST}
           sstOffset={sstOffset}
           showBathy={showBathy}
-          showHotspots={showHotspots}
-          onSaveWaypoint={handleSaveWaypoint}
+          showWeather={showWeather}
+          isPlotterArmed={isPlotterArmed} 
+          onHotspotClick={handleHotspotClick}
+          onHotspotsResolved={handleHotspotsResolved}
           flyTo={flyTo}
-          className="absolute inset-0 w-full h-full"
+          className="absolute inset-0"
         />
-      ) : (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950 gap-3 text-slate-400 z-[1500]">
-          <div className="w-6 h-6 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin" />
-          <span className="text-xs font-medium tracking-wide">Syncing Pre-Scored Thermal Hotspots…</span>
+
+        {/* Floating Controller HUD */}
+        <div className="absolute top-2 right-2 z-[1000] flex flex-col gap-1.5 items-end">
+          <button
+            onClick={() => setShowControls((v) => !v)}
+            className="bg-slate-900/90 border border-slate-700 text-slate-200 p-2 rounded-xl shadow-xl flex items-center justify-center backdrop-blur-sm"
+          >
+            <Layers className="w-4 h-4" />
+          </button>
+
+          {/* Master Operational Navigation Arm Button */}
+          <button
+            onClick={() => setIsPlotterArmed((prev) => !prev)}
+            className={`border p-2 rounded-xl shadow-xl flex items-center justify-center backdrop-blur-sm transition-all ${
+              isPlotterArmed 
+                ? "bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-cyan-500/10" 
+                : "bg-slate-900/90 border-slate-700 text-slate-400 hover:text-slate-200"
+            }`}
+            title={isPlotterArmed ? "Deactivate Leg Plotter" : "Arm Leg Plotter"}
+          >
+            <Compass className={`w-4 h-4 ${isPlotterArmed ? "animate-pulse" : ""}`} />
+          </button>
+
+          {showControls && (
+            <div className="bg-slate-900/95 border border-slate-700 p-3 rounded-xl shadow-2xl w-48 space-y-3 backdrop-blur-sm text-xs text-slate-200">
+              <div className="space-y-1.5">
+                <div className="font-semibold text-slate-400 tracking-wider uppercase text-[10px]">Layers</div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={showHotspots} onChange={(e) => setShowHotspots(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
+                  <span>AI Hotspot Pins</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={showSST} onChange={(e) => setShowSST(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
+                  <span>Satellite SST Overlay</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={showBathy} onChange={(e) => setShowBathy(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
+                  <span>High-Res Bathymetry</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={showWeather} onChange={(e) => setShowWeather(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
+                  <span>Marine Sea State</span>
+                </label>
+              </div>
+
+              <div className="space-y-1.5 border-t border-slate-800 pt-2">
+                <div className="font-semibold text-slate-400 tracking-wider uppercase text-[10px] flex items-center gap-1">
+                  <History className="w-3 h-3" /> Historical Playback
+                </div>
+                <div className="grid grid-cols-4 gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800">
+                  {[
+                    { label: "Live", val: 0 },
+                    { label: "-12h", val: 1 },
+                    { label: "-24h", val: 2 },
+                    { label: "-36h", val: 3 },
+                  ].map((t) => (
+                    <button
+                      key={t.val}
+                      onClick={() => setSstOffset(t.val)}
+                      className={`text-[10px] font-medium py-1 rounded-md transition-all ${
+                        sstOffset === t.val
+                          ? "bg-cyan-600 text-white shadow-md font-semibold"
+                          : "text-slate-400 hover:text-slate-200"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
+
+        <button
+          onClick={() => setShowMap((v) => !v)}
+          className="absolute bottom-2 right-2 z-[1000] bg-slate-800/90 border border-slate-600 text-slate-300 text-xs px-2 py-1 rounded-lg flex items-center gap-1"
+        >
+          {showMap ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+          {showMap ? "Hide map" : "Show map"}
+        </button>
+
+        <div className="absolute bottom-2 left-2 z-[1000] bg-slate-800/80 rounded px-2 py-1 border border-slate-700">
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-blue-400">60°F</span>
+            <div className="w-16 h-1.5 rounded bg-gradient-to-r from-blue-500 via-yellow-400 to-red-500" />
+            <span className="text-xs text-red-400">85°F</span>
+          </div>
+        </div>
+      </div>
+
+      {!showMap && (
+        <button
+          onClick={() => setShowMap(true)}
+          className="mx-4 mt-2 bg-slate-800 border border-slate-600 text-slate-300 text-xs px-3 py-2 rounded-lg flex items-center justify-center gap-1"
+        >
+          <ChevronDown className="w-3 h-3" /> Show map
+        </button>
       )}
 
-      {/* Waypoints Panel */}
-      {showWaypoints && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1200] w-[min(340px,calc(100vw-24px))] bg-slate-900/95 border border-cyan-700 rounded-xl shadow-2xl flex flex-col max-h-[70vh]">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700">
-            <span className="text-sm font-bold text-cyan-400 flex items-center gap-1.5">
-              <BookmarkCheck className="w-4 h-4" /> Saved Waypoints ({waypoints.length})
-            </span>
-            <button onClick={() => setShowWaypoints(false)} className="text-slate-400 hover:text-white p-1">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="overflow-y-auto flex-1">
-            {waypoints.length === 0 ? (
-              <div className="text-slate-500 text-xs text-center py-8 px-4">
-                No waypoints saved yet. <br /> Tap anywhere on the map to add one.
-              </div>
-            ) : (
-              waypoints.map((wp) => (
-                <div key={wp.id} className="flex items-start gap-2 px-3 py-2.5 border-b border-slate-800 last:border-0">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-white truncate">{wp.name}</div>
-                    <div className="text-xs text-cyan-400">{wp.lat.toFixed(4)}°N, {Math.abs(wp.lng).toFixed(4)}°W</div>
-                    <div className="text-xs text-slate-400">📡 LORAN W {wp.tdW} / X {wp.tdX} μs</div>
-                    <div className="text-[10px] text-slate-600 mt-0.5">{new Date(wp.savedAt).toLocaleDateString()}</div>
-                  </div>
-                  <div className="flex flex-col gap-1 shrink-0">
-                    <button
-                      onClick={() => {
-                        setFlyTo({ lat: wp.lat, lng: wp.lng, zoom: 10 });
-                        setShowWaypoints(false);
-                      }}
-                      className="text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-300 rounded px-2 py-1"
-                    >
-                      Go
-                    </button>
-                    <button onClick={() => deleteWaypoint(wp.id)} disabled={wpMutating} className="text-red-400 hover:text-red-300 p-1 disabled:opacity-50">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ))
+      {/* ── Card List ────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+            <Target className="w-5 h-5 text-orange-400" /> Tactical Intelligence
+          </h2>
+          <div className="flex items-center gap-2">
+            {loadingIds.size > 0 && (
+              <span className="flex items-center gap-1 text-xs text-cyan-400">
+                <RefreshCw className="w-3 h-3 animate-spin" />
+                fetching live SST…
+              </span>
+            )}
+            {cacheAge !== null && loadingIds.size === 0 && (
+              <span className="text-xs text-slate-500">
+                Updated {cacheAge === 0 ? "just now" : `${cacheAge} min ago`}
+              </span>
             )}
           </div>
         </div>
-      )}
 
-      {/* SST History Panel */}
-      <div className="absolute bottom-4 left-3 z-[1000] bg-slate-900/95 border border-slate-600 rounded-lg px-2 py-1.5 flex flex-col items-center gap-1 w-[min(230px,calc(100vw-80px))]">
-        <div className="flex items-center gap-1.5 w-full">
-          <Clock className="w-3 h-3 text-cyan-400 shrink-0" />
-          <span className="text-[9px] text-slate-300 font-semibold flex-1">SST History</span>
-          <button
-            onClick={() => {
-              setIsAnimating((a) => !a);
-              if (!showSST) setShowSST(true);
-            }}
-            className={`text-[9px] px-1.5 py-0.5 rounded border transition-all min-w-[42px] ${isAnimating ? "bg-cyan-500 border-cyan-400 text-white" : "bg-slate-700 border-slate-500 text-slate-300"}`}
-          >
-            {isAnimating ? "⏹ Stop" : "▶ Play"}
-          </button>
-        </div>
-        <div className="grid grid-cols-4 gap-0.5 w-full">
-          {SST_HISTORY_OFFSETS.map((offset) => (
-            <button
-              key={offset}
-              onClick={() => {
-                setSstOffset(offset);
-                setIsAnimating(false);
-                if (!showSST) setShowSST(true);
-              }}
-              className={`py-0.5 rounded text-[9px] font-semibold border transition-all text-center leading-tight ${sstOffset === offset ? "bg-orange-500 border-orange-400 text-white" : "bg-slate-800 border-slate-600 text-slate-400"}`}
-            >
-              {gibsSSTLabel(offset)}
-            </button>
-          ))}
-        </div>
-        <div className="text-[9px] text-slate-500 self-start">{gibsSSTDate(3 + sstOffset)} · MUR 1km</div>
-      </div>
+        <p className="text-xs text-slate-500">
+          SST from NOAA CoastWatch ERDDAP · ACSPO L3S 0.02° · Cached hourly
+        </p>
 
-      {/* Toolbar Layer */}
-      <div className="absolute top-3 right-3 z-[1100] flex flex-col gap-2">
-        <button onClick={() => setShowSST(!showSST)} className={`p-2 rounded-lg border transition-all ${showSST ? "bg-orange-500 border-orange-400 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}>
-          <Thermometer className="w-5 h-5" />
-        </button>
-        <button onClick={() => setShowBathy(!showBathy)} className={`p-2 rounded-lg border transition-all ${showBathy ? "bg-blue-500 border-blue-400 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}>
-          <Layers className="w-5 h-5" />
-        </button>
-        <button onClick={() => setShowHotspots(!showHotspots)} className={`p-2 rounded-lg border transition-all ${showHotspots ? "bg-emerald-600 border-emerald-500 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300"}`}>
-          <Target className="w-5 h-5" />
-        </button>
-        <button
-          onClick={() => {
-            if (navigator.geolocation) {
-              navigator.geolocation.getCurrentPosition((pos) => {
-                setFlyTo({ lat: pos.coords.latitude, lng: pos.coords.longitude, zoom: 10 });
-              });
-            }
-          }}
-          className="p-2 rounded-lg bg-slate-800/90 border border-slate-600 text-slate-300 hover:bg-slate-700 transition-all"
-        >
-          <Navigation className="w-5 h-5" />
-        </button>
-        <button onClick={() => setShowWaypoints((v) => !v)} className={`p-2 rounded-lg border transition-all relative ${showWaypoints ? "bg-cyan-600 border-cyan-500 text-white" : "bg-slate-800/90 border-slate-600 text-slate-300 hover:bg-slate-700"}`}>
-          <Bookmark className="w-5 h-5" />
-          {waypoints.length > 0 && (
-            <span className="absolute -top-1 -right-1 bg-cyan-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-              {waypoints.length > 9 ? "9+" : waypoints.length}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {/* Legend Container */}
-      <div className="absolute top-3 left-3 z-[1000] bg-slate-800/90 rounded-lg p-2 border border-slate-700 space-y-1">
-        <div className="text-xs font-semibold text-slate-300 mb-1">Hotspots</div>
-        {[
-          { label: "High ≥80%", color: "#34d399" },
-          { label: "Med 65–79%", color: "#fbbf24" },
-          { label: "Low <65%", color: "#f87171" },
-        ].map(({ label, color }) => (
-          <div key={label} className="flex items-center gap-2">
-            <span className="inline-block w-3 h-3 rounded-full border-2" style={{ borderColor: color, background: color + "55" }} />
-            <span className="text-xs text-slate-400">{label}</span>
+        {allSatelliteUnavailable && (
+          <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+            <AlertTriangle className="w-10 h-10 text-amber-500 opacity-70" />
+            <div className="text-amber-400 font-semibold text-base">No satellite SST available</div>
           </div>
-        ))}
-      </div>
+        )}
 
-      {/* Tap Matrix Bar */}
-      <div className="absolute bottom-3 right-3 z-[1000] bg-slate-900/85 rounded px-1.5 py-1 border border-slate-700/60">
-        <div className="text-[9px] text-slate-400 mb-0.5 leading-none">tap map for temp</div>
-        <div className="flex items-center gap-0.5">
-          <span className="text-[8px] text-blue-400">60&#176;</span>
-          <div className="w-16 h-1.5 rounded bg-gradient-to-r from-blue-500 via-yellow-400 to-red-500" />
-          <span className="text-[8px] text-red-400">85&#176;</span>
-        </div>
+        {displayHotspots.map((h) => {
+          const td = toLoranTD(h.lat, h.lng);
+          const isSelected = selectedId === h.id;
+          const def = dynamicDefs.find((d) => d.id === h.id);
+
+          return (
+            <div
+              key={h.id}
+              onClick={() => handleHotspotClick(h.id)}
+              className={`bg-slate-800 rounded-xl p-4 border transition-all cursor-pointer space-y-2 ${
+                isSelected ? "border-emerald-500/60 shadow-lg shadow-emerald-900/20" : "border-slate-700"
+              }`}
+            >
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="font-semibold text-white flex items-center gap-2 text-sm">
+                    {h.distanceLabel ?? h.title}
+                    {def?.isPrimaryAI && <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded uppercase">PRIMARY</span>}
+                    {def?.isSecondaryAI && <span className="text-[9px] font-bold bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded uppercase">SECONDARY</span>}
+                  </h3>
+                  <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
+                    <MapPin className="w-3 h-3" />
+                    {h.lat.toFixed(2)}°, {Math.abs(h.lng).toFixed(2)}°W
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-bold" style={{ color: getLocalConfidenceColor(h.confidence) }}>{h.confidence}%</div>
+                  <div className="text-[10px] text-slate-500">confidence</div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 text-xs flex-wrap">
+                <div className="flex items-center gap-1">
+                  <ThermometerSun className="w-4 h-4 text-orange-400" />
+                  <span className="text-orange-400 font-semibold">{h.sstTemp.toFixed(1)}°F</span>
+                </div>
+                <div className="flex items-center gap-1 text-amber-400">
+                  <Flame className="w-4 h-4" />
+                  {h.breakDelta > 0 ? `+${h.breakDelta.toFixed(1)}°F break` : "no break"}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-700/30">
+                <div className="text-purple-400 flex items-center gap-1">
+                  <Navigation className="w-3 h-3" />
+                  TD: W {td.w} / X {td.x}
+                </div>
+                <div className="text-slate-500 font-mono">{def ? `${def.idealSstF || 72}° ideal` : ""}</div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
