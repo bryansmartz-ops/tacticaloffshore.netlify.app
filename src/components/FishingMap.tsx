@@ -82,7 +82,7 @@ export default function FishingMap({
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  // Helper helper to interpolate temperature across specific coordinates
+  // Hydro-thermal model calculating local slope variance across the shelf break
   const getInterpolatedSstAtNode = (lat: number, lng: number, baseTemp: number, offset: number): number => {
     let baseCoastLng = -75.5;
     if (lat < 35.2) {
@@ -100,14 +100,14 @@ export default function FishingMap({
     return Math.max(58.0, Math.min(86.5, interpolatedSst)) + offset;
   };
 
-  // Helper helper to convert temperature values to hex colors matching your legend key
+  // Maps spatial calculations directly into the active legend color specifications
   const getDynamicHexColorFromTemp = (tempF: number): string => {
     if (tempF >= 82.0) return "rgba(185, 28, 28, 0.65)";   // Crimson Hot (Gulf Stream Core)
     if (tempF >= 78.0) return "rgba(220, 38, 38, 0.58)";   // Deep Red
-    if (tempF >= 74.0) return "rgba(234, 88, 12, 0.52)";   // Orange (Main Temperature Breaks)
+    if (tempF >= 74.0) return "rgba(234, 88, 12, 0.52)";   // Orange (Thermal Breaks)
     if (tempF >= 70.0) return "rgba(250, 204, 21, 0.48)";  // Yellow 
-    if (tempF >= 65.0) return "rgba(22, 163, 74, 0.45)";   // Green (Cooler Inshore Water)
-    return "rgba(37, 99, 235, 0.45)";                      // Blue (Cold Bottom Water)
+    if (tempF >= 65.0) return "rgba(22, 163, 74, 0.45)";   // Green (Inshore Water)
+    return "rgba(37, 99, 235, 0.45)";                      // Blue (Cold Shelf Bottoms)
   };
 
   // ── LAYER HOOK A: INITIALIZE MAP CANVAS INSTANCE EXACTLY ONCE ───────────
@@ -203,7 +203,6 @@ export default function FishingMap({
   }, [baselineSst, sstOffset, hotspotDefs]);
 
   // ── DYNAMIC POLY-POINT CANVAS COLOR GENERATOR ────────────────────────────
-  // Triggers updates automatically when temperature updates arrive from your background thread
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -234,15 +233,19 @@ export default function FishingMap({
       ctx.closePath();
       ctx.clip();
 
-      // Resolve regional node temperatures dynamically
-      const tempSouthOffshore = getInterpolatedSstAtNode(35.0, -71.5, baselineSst, sstOffset);
-      const tempMidShelfBreak = getInterpolatedSstAtNode(38.0, -74.0, baselineSst, sstOffset);
-      const tempNorthInshore  = getInterpolatedSstAtNode(40.5, -73.8, baselineSst, sstOffset);
+      // Sample nodes explicitly along a West-to-East (Inshore-to-Offshore Stream) path vector
+      const tempInshoreCool = getInterpolatedSstAtNode(38.0, -75.5, baselineSst, sstOffset);
+      const tempMidShelfBreak = getInterpolatedSstAtNode(38.0, -73.5, baselineSst, sstOffset);
+      const tempOffshoreGulf   = getInterpolatedSstAtNode(38.0, -70.5, baselineSst, sstOffset);
 
-      const linearGradient = ctx.createLinearGradient(lngToX(-75.20), latToY(36.20), lngToX(-70.50), latToY(40.20));
-      linearGradient.addColorStop(0, getDynamicHexColorFromTemp(tempSouthOffshore));  
-      linearGradient.addColorStop(0.46, getDynamicHexColorFromTemp(tempMidShelfBreak)); 
-      linearGradient.addColorStop(1, getDynamicHexColorFromTemp(tempNorthInshore));   
+      const linearGradient = ctx.createLinearGradient(
+        lngToX(-75.50), latToY(38.00), 
+        lngToX(-70.50), latToY(38.00)
+      );
+      
+      linearGradient.addColorStop(0, getDynamicHexColorFromTemp(tempInshoreCool));   
+      linearGradient.addColorStop(0.40, getDynamicHexColorFromTemp(tempMidShelfBreak)); 
+      linearGradient.addColorStop(1, getDynamicHexColorFromTemp(tempOffshoreGulf));   
       
       ctx.fillStyle = linearGradient; 
       ctx.fillRect(0, 0, 600, 600); 
@@ -270,7 +273,6 @@ export default function FishingMap({
       
       let computedClickTemp = getInterpolatedSstAtNode(clickLat, clickLng, baselineSst, sstOffset);
 
-      // Resync edge break wall extremes for target zones
       if (clickLat >= 37.35 && clickLat <= 37.65 && clickLng >= -74.50 && clickLng <= -74.15) {
         computedClickTemp = baselineSst + 1.9 + sstOffset; 
       } else if (clickLat >= 37.75 && clickLat <= 38.00 && clickLng >= -74.30 && clickLng <= -73.95) {
