@@ -227,7 +227,7 @@ export default function Hotspots() {
                   <span>Satellite SST Overlay</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={showBathy} onChange={(e) => setShowBathy} onChange={(e) => setShowBathy(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
+                  <input type="checkbox" checked={showBathy} onChange={(e) => setShowBathy(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
                   <span>High-Res Bathymetry</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
