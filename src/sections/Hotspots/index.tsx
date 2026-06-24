@@ -1,5 +1,5 @@
 // src/sections/Hotspots/index.tsx
-// High-Fidelity Non-Blocking Intel Deck - Plotted Mode Controller
+// High-Fidelity Non-Blocking Intel Deck - GPS Integrated Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useState, useCallback, useEffect, useMemo } from "react";
@@ -151,6 +151,23 @@ export default function Hotspots() {
     if (h) setFlyTo({ lat: h.lat, lng: h.lng, zoom: 9 });
   }, [dynamicDefs, liveHotspots]);
 
+  // Restores browser GPS coordinate stream tracking smoothly
+  const handleTriggerGpsRecenter = useCallback(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setFlyTo({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            zoom: 11 // Focus tightly onto the vessel's live location
+          });
+        },
+        (err) => console.warn("[Vessel GPS Matrix Standby]: Offline link active.", err),
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    }
+  }, []);
+
   const fetchesDone = loadingIds.size === 0;
   const allSatelliteUnavailable = fetchesDone && liveHotspots.length === 0;
 
@@ -193,13 +210,22 @@ export default function Hotspots() {
           className="absolute inset-0"
         />
 
-        {/* Floating Controller HUD */}
+        {/* Floating Controller HUD Stack */}
         <div className="absolute top-2 right-2 z-[1000] flex flex-col gap-1.5 items-end">
           <button
             onClick={() => setShowControls((v) => !v)}
             className="bg-slate-900/90 border border-slate-700 text-slate-200 p-2 rounded-xl shadow-xl flex items-center justify-center backdrop-blur-sm"
           >
             <Layers className="w-4 h-4" />
+          </button>
+
+          {/* Boat Tracker GPS Icon — Restored */}
+          <button
+            onClick={handleTriggerGpsRecenter}
+            className="bg-slate-900/90 border border-slate-700 text-slate-400 hover:text-slate-200 p-2 rounded-xl shadow-xl flex items-center justify-center backdrop-blur-sm transition-all"
+            title="Recenter On Boat GPS"
+          >
+            <Navigation className="w-4 h-4 transform rotate-45" />
           </button>
 
           {/* Master Operational Navigation Arm Button */}
@@ -365,26 +391,6 @@ export default function Hotspots() {
                   {h.breakDelta > 0 ? `+${h.breakDelta.toFixed(1)}°F break` : "no break"}
                 </div>
               </div>
-
-              {h.signals && (
-                <div className="space-y-0.5 mt-1 border-t border-slate-700/50 pt-1.5">
-                  {[
-                    { label: "SST", val: h.signals.sstScore || 0, max: 20, color: "#fb923c" },
-                    { label: "Break", val: h.signals.sstBreakScore || 0, max: 35, color: "#fbbf24" },
-                    { label: "Chloro", val: h.signals.chloroScore || 0, max: 20, color: "#4ade80" },
-                    { label: "SSH", val: h.signals.altimetryScore || 0, max: 15, color: "#818cf8" },
-                    { label: "History", val: h.signals.historyReportsScore || 0, max: 10, color: "#67e8f9" },
-                  ].map((r) => (
-                    <div key={r.label} className="flex items-center gap-1.5">
-                      <span className="text-[9px] text-slate-500 w-10 shrink-0">{r.label}</span>
-                      <div className="flex-1 bg-slate-700 rounded-full h-1 overflow-hidden">
-                        <div className="h-full rounded-full transition-all" style={{ width: `${Math.round((r.val / r.max) * 100)}%`, background: r.color }} />
-                      </div>
-                      <span className="text-[9px] shrink-0 font-mono" style={{ color: r.color }}>{r.val}/{r.max}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
 
               <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-700/30">
                 <div className="text-purple-400 flex items-center gap-1">
