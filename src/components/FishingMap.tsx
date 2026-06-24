@@ -1,10 +1,10 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Non-Blocking Asynchronous Mapping Deck - Dynamic Thermal Edition
+// High-Fidelity Non-Blocking Asynchronous Mapping Deck - Leg Plotter Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
-import { confidenceColor, toLoranTD } from "../lib/hotspots";
+import { confidenceColor, toLoranTD, haversineNm } from "../lib/hotspots";
 
 export interface HotspotDisplay {
   id: string;
@@ -52,6 +52,17 @@ const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services
 const WEATHER_WAVE_TILE = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"; 
 
 const TELEMETRY_PROXY = "/.netlify/functions/get-latest-briefs";
+const OC_INLET = { lat: 38.3289, lng: -75.0913 }; // OC Sea Buoy Reference Anchor
+
+// Function to calculate Magnetic Bearing (incorporating standard Mid-Atlantic variation ~11.5W)
+function calculateBearingMagnetic(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const y = Math.sin(dLng) * Math.cos((lat2 * Math.PI) / 180);
+  const x = Math.cos((lat1 * Math.PI) / 180) * Math.sin((lat2 * Math.PI) / 180) - Math.sin((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.cos(dLng);
+  let trueBearing = (Math.atan2(y, x) * 180) / Math.PI;
+  trueBearing = (trueBearing + 360) % 360;
+  return Math.round((trueBearing + 11.5) % 360); // Adds 11.5 degrees for Western Variation
+}
 
 export default function FishingMap({
   mode,
@@ -82,7 +93,11 @@ export default function FishingMap({
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  // Hydro-thermal model calculating local slope variance across the shelf break
+  // Refs to manage the captain's live leg plotter tools across renders
+  const navAnchorRef = useRef<L.LatLng | null>(null);
+  const navAnchorMarkerRef = useRef<L.Marker | null>(null);
+  const navPolylineRef = useRef<L.Polyline | null>(null);
+
   const getInterpolatedSstAtNode = (lat: number, lng: number, baseTemp: number, offset: number): number => {
     let baseCoastLng = -75.5;
     if (lat < 35.2) {
@@ -100,17 +115,16 @@ export default function FishingMap({
     return Math.max(58.0, Math.min(86.5, interpolatedSst)) + offset;
   };
 
-  // Maps spatial calculations directly into the active legend color specifications
   const getDynamicHexColorFromTemp = (tempF: number): string => {
-    if (tempF >= 82.0) return "rgba(185, 28, 28, 0.65)";   // Crimson Hot (Gulf Stream Core)
-    if (tempF >= 78.0) return "rgba(220, 38, 38, 0.58)";   // Deep Red
-    if (tempF >= 74.0) return "rgba(234, 88, 12, 0.52)";   // Orange (Thermal Breaks)
-    if (tempF >= 70.0) return "rgba(250, 204, 21, 0.48)";  // Yellow 
-    if (tempF >= 65.0) return "rgba(22, 163, 74, 0.45)";   // Green (Inshore Water)
-    return "rgba(37, 99, 235, 0.45)";                      // Blue (Cold Shelf Bottoms)
+    if (tempF >= 82.0) return "rgba(185, 28, 28, 0.65)";   
+    if (tempF >= 78.0) return "rgba(220, 38, 38, 0.58)";   
+    if (tempF >= 74.0) return "rgba(234, 88, 12, 0.52)";   
+    if (tempF >= 70.0) return "rgba(250, 204, 21, 0.48)";  
+    if (tempF >= 65.0) return "rgba(22, 163, 74, 0.45)";   
+    return "rgba(37, 99, 235, 0.45)";                      
   };
 
-  // ── LAYER HOOK A: INITIALIZE MAP CANVAS INSTANCE EXACTLY ONCE ───────────
+  // ── LAYER HOOK A: INITIALIZE MAP INSTANCE ───────────────────────────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -138,7 +152,7 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // ── LAYER HOOK B: STANDALONE INTEL SYSTEM WORKER INITIALIZATION ──────────
+  // ── LAYER HOOK B: SYSTEM WORKER INITIALIZATION ──────────────────────────
   useEffect(() => {
     workerRef.current = new Worker(
       new URL("/src/workers/hotspotEvaluator.worker.ts", import.meta.url),
@@ -161,7 +175,7 @@ export default function FishingMap({
     };
   }, [onHotspotsResolved]);
 
-  // ── LAYER HOOK C: TELEMETRY STREAM PARSING ──────────────────────────────
+  // ── LAYER HOOK C: TELEMETRY FETCH PIPELINE ──────────────────────────────
   useEffect(() => {
     let activeScope = true;
     async function loadCloudTelemetry() {
@@ -207,9 +221,7 @@ export default function FishingMap({
     const map = mapRef.current;
     if (!map) return;
 
-    if (sstStaticOverlayRef.current) {
-      map.removeLayer(sstStaticOverlayRef.current);
-    }
+    if (sstStaticOverlayRef.current) map.removeLayer(sstStaticOverlayRef.current);
 
     const sstVisualBounds: L.LatLngBoundsExpression = [[34.5, -76.5], [41.0, -70.0]];
     const offscreenCanvas = document.createElement("canvas");
@@ -223,44 +235,28 @@ export default function FishingMap({
       const lngToX = (lng: number) => ((lng - (-76.5)) / (-70.0 - (-76.5))) * 600;
 
       ctx.beginPath();
-      ctx.moveTo(lngToX(-75.51), latToY(35.22)); 
-      ctx.lineTo(lngToX(-75.95), latToY(36.85)); 
-      ctx.lineTo(lngToX(-75.05), latToY(38.35)); 
-      ctx.lineTo(lngToX(-74.25), latToY(39.50)); 
-      ctx.lineTo(lngToX(-73.95), latToY(40.50)); 
-      ctx.lineTo(lngToX(-70.00), latToY(41.00)); 
-      ctx.lineTo(lngToX(-70.00), latToY(34.50)); 
-      ctx.closePath();
-      ctx.clip();
+      ctx.moveTo(lngToX(-75.51), latToY(35.22)); ctx.lineTo(lngToX(-75.95), latToY(36.85)); 
+      ctx.lineTo(lngToX(-75.05), latToY(38.35)); ctx.lineTo(lngToX(-74.25), latToY(39.50)); 
+      ctx.lineTo(lngToX(-73.95), latToY(40.50)); ctx.lineTo(lngToX(-70.00), latToY(41.00)); 
+      ctx.lineTo(lngToX(-70.00), latToY(34.50)); ctx.closePath(); ctx.clip();
 
-      // Sample nodes explicitly along a West-to-East (Inshore-to-Offshore Stream) path vector
       const tempInshoreCool = getInterpolatedSstAtNode(38.0, -75.5, baselineSst, sstOffset);
       const tempMidShelfBreak = getInterpolatedSstAtNode(38.0, -73.5, baselineSst, sstOffset);
       const tempOffshoreGulf   = getInterpolatedSstAtNode(38.0, -70.5, baselineSst, sstOffset);
 
-      const linearGradient = ctx.createLinearGradient(
-        lngToX(-75.50), latToY(38.00), 
-        lngToX(-70.50), latToY(38.00)
-      );
-      
+      const linearGradient = ctx.createLinearGradient(lngToX(-75.50), latToY(38.00), lngToX(-70.50), latToY(38.00));
       linearGradient.addColorStop(0, getDynamicHexColorFromTemp(tempInshoreCool));   
       linearGradient.addColorStop(0.40, getDynamicHexColorFromTemp(tempMidShelfBreak)); 
       linearGradient.addColorStop(1, getDynamicHexColorFromTemp(tempOffshoreGulf));   
       
-      ctx.fillStyle = linearGradient; 
-      ctx.fillRect(0, 0, 600, 600); 
-      ctx.filter = "blur(8px)";
-      
+      ctx.fillStyle = linearGradient; ctx.fillRect(0, 0, 600, 600); ctx.filter = "blur(8px)";
       const thermalImageString = offscreenCanvas.toDataURL();
       sstStaticOverlayRef.current = L.imageOverlay(thermalImageString, sstVisualBounds, { pane: "sstPane", interactive: false });
-      
-      if (showSST) {
-        sstStaticOverlayRef.current.addTo(map);
-      }
+      if (showSST) sstStaticOverlayRef.current.addTo(map);
     }
   }, [baselineSst, sstOffset, showSST]);
 
-  // ── LAYER HOOK D: DYNAMIC MAP CLICK TELEMETRY ROUTER ─────────────────────
+  // ── LAYER HOOK D: DYNAMIC LEG PLOTTER AND CODES INTERCEPTOR ───────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -279,16 +275,72 @@ export default function FishingMap({
         computedClickTemp = baselineSst + 1.3 + sstOffset; 
       }
 
+      const rangeToOcInlet = haversineNm(OC_INLET.lat, OC_INLET.lng, clickLat, clickLng);
       const loran = toLoranTD(clickLat, clickLng);
+
+      // ── LIVE POINT-TO-POINT CAPTAIN'S PLOTTER LOGIC ──────────────────────
+      let plotterHtmlLine = "";
+
+      if (!navAnchorRef.current) {
+        // Step 1: First click sets the custom navigation origin waypoint
+        navAnchorRef.current = e.latlng;
+        
+        navAnchorMarkerRef.current = L.marker(e.latlng, {
+          icon: L.divIcon({
+            className: "",
+            html: `<div style="display:flex; items-center; justify-content:center; width:20px; height:20px; background:rgba(34,211,238,0.2); border:2px solid #22d3ee; border-radius:50%;"><span style="width:4px; height:4px; background:#22d3ee; border-radius:50%; margin:auto;"></span></div>`,
+            iconSize: [20, 20], iconAnchor: [10, 10]
+          })
+        }).addTo(map);
+
+        plotterHtmlLine = `
+          <div style="margin-top:5px; padding:4px 6px; background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3); border-radius:6px; color:#22d3ee; text-align:center; font-weight:bold; font-size:10px;">
+            📍 NAV ORIGIN DROPPED<br/>Tap next mark to calculate heading/range.
+          </div>`;
+      } else {
+        // Step 2: Second click draws the line and computes precise navigation vectors
+        const start = navAnchorRef.current;
+        const currentLegNm = haversineNm(start.lat, start.lng, clickLat, clickLng);
+        const magneticBearing = calculateBearingMagnetic(start.lat, start.lng, clickLat, clickLng);
+
+        if (navPolylineRef.current) map.removeLayer(navPolylineRef.current);
+        
+        navPolylineRef.current = L.polyline([start, e.latlng], {
+          color: "#22d3ee", weight: 3, dashArray: "5, 8", pane: "hotspotPane"
+        }).addTo(map);
+
+        // Scan canonical list to find the closest canyon or rim structure to our destination tap
+        let destinationStructureText = "Open Ocean Grid";
+        let minCanyonDist = 9999;
+        CANYONS.forEach((c) => {
+          const dist = haversineNm(c.lat, c.lng, clickLat, clickLng);
+          if (dist < minCanyonDist) {
+            minCanyonDist = dist;
+            destinationStructureText = dist < 2.0 ? `${c.name} Canyon Rim` : `${c.name} (${dist.toFixed(1)} NM)`;
+          }
+        });
+
+        plotterHtmlLine = `
+          <div style="margin-top:6px; padding:5px; background:rgba(34,211,238,0.15); border:1px solid #22d3ee; border-radius:6px; font-family:monospace;">
+            <b style="color:#22d3ee; display:block; border-bottom:1px solid rgba(34,211,238,0.3); margin-bottom:3px; font-size:11px;">📐 PLOTTED LEG ROUTE</b>
+            To: <span style="color:#fff;">${destinationStructureText}</span><br/>
+            Range: <span style="color:#fff; font-weight:bold;">${currentLegNm.toFixed(1)} NM</span><br/>
+            Heading: <span style="color:#34d399; font-weight:bold;">${magneticBearing.toString().padStart(3, "0")}°M</span>
+            <button id="clr-nav-line" style="width:100%; margin-top:5px; background:#ff4d4d; border:none; color:white; font-size:8px; padding:2px; font-weight:bold; border-radius:3px; cursor:pointer;">CLEAR LEG PLOTTER</button>
+          </div>`;
+          
+        // Reset the tracking coordinates reference for successive runs
+        navAnchorRef.current = null;
+      }
+
       const waveHeight = buoyData ? buoyData.waveHeight : "3.0";
       const wavePeriod = buoyData ? buoyData.period : "8";
       const windDirection = buoyData ? buoyData.windDirection : "W";
       const windSpeed = buoyData ? buoyData.windSpeed : "10-15";
       const telemetrySource = buoyData ? buoyData.source : "OFFSHORE HARMONIC CONSOLE";
-
       const badgeColor = telemetrySource.includes("NOAA") ? "#22c55e" : "#64748b";
 
-      L.popup()
+      const popup = L.popup()
         .setLatLng(e.latlng)
         .setContent(`
           <div style="color:#cbd5e1;font-size:11px;min-width:215px;font-family:monospace;line-height:1.5;">
@@ -299,10 +351,31 @@ export default function FishingMap({
             <span style="color:#38bdf8;">Waves: ${waveHeight}ft @ ${wavePeriod}s</span><br/>
             <span style="color:#a78bfa;">Wind : ${windSpeed}kt (${windDirection})</span><br/>
             <span style="color:#cbd5e1;">TD: W ${loran.w} / X ${loran.x}</span>
+            
+            <div style="margin-top:5px; padding-top:4px; border-top:1px solid rgba(255,255,255,0.1); color:#94a3b8;">
+              ⚓ OC Inlet Buoy: ${rangeToOcInlet.toFixed(1)} NM
+            </div>
+            
+            ${plotterHtmlLine}
+            
             <div style="font-size:8px;color:${badgeColor};text-align:right;margin-top:6px;font-weight:bold;letter-spacing:0.3px;">📡 SOURCE: ${telemetrySource}</div>
           </div>
         `)
         .openOn(map);
+
+      // Event listener handling cleanup actions inside the popup element
+      popup.on("add", () => {
+        const clrBtn = document.getElementById("clr-nav-line");
+        if (clrBtn) {
+          clrBtn.onclick = (event) => {
+            event.stopPropagation();
+            if (navPolylineRef.current) map.removeLayer(navPolylineRef.current);
+            if (navAnchorMarkerRef.current) map.removeLayer(navAnchorMarkerRef.current);
+            navAnchorRef.current = null;
+            map.closePopup();
+          };
+        }
+      });
     });
 
     return () => { map.off("click"); };
@@ -347,6 +420,7 @@ export default function FishingMap({
     liveHotspots.forEach((h) => {
       const color = confidenceColor(h.confidence);
       const circle = L.circleMarker([h.lat, h.lng], { pane: "hotspotPane", radius: 12, color, fillColor: color, fillOpacity: 0.4, weight: 2 });
+      const td = toLoranTD(h.lat, h.lng);
       
       circle.bindPopup(`
         <div style="color:#cbd5e1;font-size:12px;min-width:200px;font-family:monospace;">
