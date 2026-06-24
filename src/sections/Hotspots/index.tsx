@@ -40,12 +40,12 @@ export default function Hotspots() {
   const [flyTo, setFlyTo] = useState<{ lat: number; lng: number; zoom?: number } | undefined>();
 
   const [showHotspots, setShowHotspots] = useState(true);
-  const [showSST, setShowSST} = useState(true);
+  const [showSST, setShowSST] = useState(true);
   const [showBathy, setShowBathy] = useState(true);
   const [showWeather, setShowWeather] = useState(false); 
   const [sstOffset, setSstOffset] = useState<number>(0); 
   const [showControls, setShowControls] = useState(false);
-  const [isPlotterArmed, setIsPlotterArmed] = useState(false); // Master Plotting Toggle State
+  const [isPlotterArmed, setIsPlotterArmed] = useState(false); 
 
   const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
   const [sstDate] = useState<string>(() => gibsSSTDate(3));
@@ -185,7 +185,7 @@ export default function Hotspots() {
           sstOffset={sstOffset}
           showBathy={showBathy}
           showWeather={showWeather}
-          isPlotterArmed={isPlotterArmed} // Pushes active toggling mode directly down to Leaflet
+          isPlotterArmed={isPlotterArmed} 
           onHotspotClick={handleHotspotClick}
           onHotspotsResolved={handleHotspotsResolved}
           flyTo={flyTo}
@@ -227,7 +227,7 @@ export default function Hotspots() {
                   <span>Satellite SST Overlay</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={showBathy} onChange={(e) => setShowBathy(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
+                  <input type="checkbox" checked={showBathy} onChange={(e) => setShowBathy} onChange={(e) => setShowBathy(e.target.checked)} className="rounded border-slate-600 bg-slate-800 text-cyan-500 focus:ring-0 w-3.5 h-3.5" />
                   <span>High-Res Bathymetry</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
