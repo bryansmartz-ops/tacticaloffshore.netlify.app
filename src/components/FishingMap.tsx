@@ -99,17 +99,16 @@ export default function FishingMap({
   const navAnchorMarkerRef = useRef<L.Marker | null>(null);
   const navPolylineRef = useRef<L.Polyline | null>(null);
 
-  // Unified master mapping scale locking absolute hex codes to hard temp ranges
+  // Locked Hex Key scale rules matching your layout legend explicitly
   const getDynamicHexColorFromTemp = (tempF: number): string => {
-    if (tempF >= 81.0) return "rgba(185, 28, 28, 0.65)";   // Crimson Hot (Gulf Stream Core)
-    if (tempF >= 77.0) return "rgba(220, 38, 38, 0.58)";   // Deep Red
-    if (tempF >= 73.0) return "rgba(234, 88, 12, 0.52)";   // Orange (Main Temperature Breaks)
-    if (tempF >= 69.0) return "rgba(250, 204, 21, 0.48)";  // Yellow/Orange Transition
-    if (tempF >= 64.0) return "rgba(22, 163, 74, 0.45)";   // Green (Cool Inshore Shelf)
-    return "rgba(37, 99, 235, 0.45)";                      // Blue (Cold Bottom Water)
+    if (tempF >= 81.0) return "rgba(185, 28, 28, 0.65)";   
+    if (tempF >= 77.0) return "rgba(220, 38, 38, 0.58)";   
+    if (tempF >= 73.0) return "rgba(234, 88, 12, 0.52)";   
+    if (tempF >= 69.0) return "rgba(250, 204, 21, 0.48)";  
+    if (tempF >= 64.0) return "rgba(22, 163, 74, 0.45)";   
+    return "rgba(37, 99, 235, 0.45)";                      
   };
 
-  // Restored high-contrast spatial interpolation formula for background rendering only
   const getInterpolatedSstAtNode = (lat: number, lng: number, baseTemp: number, offset: number): number => {
     let baseCoastLng = -75.5;
     if (lat < 35.2) {
@@ -219,7 +218,7 @@ export default function FishingMap({
     }
   }, [baselineSst, sstOffset, hotspotDefs]);
 
-  // ── RE-ENGINEERED CANVAS BACKGROUND GRADIENT GENERATOR: HIGH-CONTRAST ────
+  // ── RE-ENGINEERED CANVAS BACKGROUND GRADIENT GENERATOR ───────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -243,7 +242,6 @@ export default function FishingMap({
       ctx.lineTo(lngToX(-73.95), latToY(40.50)); ctx.lineTo(lngToX(-70.00), latToY(41.00)); 
       ctx.lineTo(lngToX(-70.00), latToY(34.50)); ctx.closePath(); ctx.clip();
 
-      // Restores high-contrast spatial sampling nodes for distinct boundaries
       const tempInshoreCool   = getInterpolatedSstAtNode(38.0, -75.5, baselineSst, sstOffset);
       const tempMidShelfBreak = getInterpolatedSstAtNode(38.0, -73.5, baselineSst, sstOffset);
       const tempOffshoreGulf  = getInterpolatedSstAtNode(38.0, -70.5, baselineSst, sstOffset);
@@ -279,7 +277,6 @@ export default function FishingMap({
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
       
-      // Keep click popups 100% accurate based on live data proximity range weighting
       let computedClickTemp = baselineSst + sstOffset; 
       let totalWeight = 0;
       let weightedTempSum = 0;
@@ -380,7 +377,7 @@ export default function FishingMap({
 
       L.popup()
         .setLatLng(e.latlng)
-        .setContent suicide text (`
+        .setContent(`
           <div style="color:#cbd5e1;font-size:11px;min-width:215px;font-family:monospace;line-height:1.5;">
             <b style="color:#22d3ee;font-size:12px;display:block;margin-bottom:5px;">🎯 Coordinate Telemetry</b>
             Lat: ${clickLat.toFixed(4)}<br/>
@@ -465,7 +462,6 @@ export default function FishingMap({
     liveHotspots.forEach((h) => {
       const color = confidenceColor(h.confidence);
       const circle = L.circleMarker([h.lat, h.lng], { pane: "hotspotPane", radius: 12, color, fillColor: color, fillOpacity: 0.4, weight: 2 });
-      
       circle.bindPopup(`
         <div style="color:#cbd5e1;font-size:12px;min-width:200px;font-family:monospace;">
           <b style="color:${color}; font-size:13px; display:block; margin-bottom:2px;">${h.title}</b>
