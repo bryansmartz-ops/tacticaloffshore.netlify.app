@@ -1,10 +1,10 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Non-Blocking Asynchronous Mapping Deck
+// High-Fidelity Non-Blocking Asynchronous Mapping Deck - Extended Offshore Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
-import { confidenceColor } from "../lib/hotspots";
+import { confidenceColor, toLoranTD } from "../lib/hotspots";
 
 export interface HotspotDisplay {
   id: string;
@@ -82,7 +82,7 @@ export default function FishingMap({
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  // ── 1. MOUNT LEAFLET BASE WORKSPACE EXACTLY ONCE ───────────────────────
+  // ── LAYER HOOK A: INITIALIZE MAP CANVAS INSTANCE EXACTLY ONCE ───────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -106,8 +106,9 @@ export default function FishingMap({
     bathyOverlayLayerRef.current = L.tileLayer(BATHY_OVERLAY_TILE, { maxNativeZoom: 10, maxZoom: 14, opacity: 0.45, pane: "bathyOverlayPane" });
     weatherLayerRef.current = L.tileLayer(WEATHER_WAVE_TILE, { maxZoom: 12, opacity: 0.65, pane: "weatherPane" });
 
-    // Client Coastal Contour Shape Mask Rendering
-    const sstVisualBounds: L.LatLngBoundsExpression = [[35.0, -76.5], [39.5, -72.0]];
+    // ── EXPANDED REGIONAL OFFSHORE BOUNDS CLIPPING MASK ───────────────────
+    // Expanded limits: North to 41.0°N (NJ/NY Bight), East out to -70.0°W (250+ NM out into the Gulf Stream)
+    const sstVisualBounds: L.LatLngBoundsExpression = [[34.5, -76.5], [41.0, -70.0]];
     const offscreenCanvas = document.createElement("canvas");
     offscreenCanvas.width = 600;
     offscreenCanvas.height = 600;
@@ -115,21 +116,27 @@ export default function FishingMap({
     
     if (ctx) {
       ctx.clearRect(0, 0, 600, 600);
-      const latToY = (lat: number) => (1.0 - (lat - 35.0) / (39.5 - 35.0)) * 600;
-      const lngToX = (lng: number) => ((lng - (-76.5)) / (-72.0 - (-76.5))) * 600;
+      // Recalibrated scale nodes to stretch calculations across the new broad coordinate grid
+      const latToY = (lat: number) => (1.0 - (lat - 34.5) / (41.0 - 34.5)) * 600;
+      const lngToX = (lng: number) => ((lng - (-76.5)) / (-70.0 - (-76.5))) * 600;
 
       ctx.beginPath();
-      ctx.moveTo(lngToX(-75.51), latToY(35.22)); ctx.lineTo(lngToX(-75.95), latToY(36.85)); 
-      ctx.lineTo(lngToX(-75.05), latToY(38.35)); ctx.lineTo(lngToX(-74.25), latToY(39.50)); 
-      ctx.lineTo(lngToX(-72.05), latToY(39.50)); ctx.lineTo(lngToX(-73.80), latToY(37.00)); 
-      ctx.lineTo(lngToX(-74.90), latToY(35.00)); ctx.closePath(); ctx.clip();
+      ctx.moveTo(lngToX(-75.51), latToY(35.22)); // Cape Hatteras Node
+      ctx.lineTo(lngToX(-75.95), latToY(36.85)); // Virginia Coast
+      ctx.lineTo(lngToX(-75.05), latToY(38.35)); // Ocean City Inlet baseline
+      ctx.lineTo(lngToX(-74.25), latToY(39.50)); // New Jersey coastline tracking point
+      ctx.lineTo(lngToX(-73.95), latToY(40.50)); // Up to NY/Long Island approaches
+      ctx.lineTo(lngToX(-70.00), latToY(41.00)); // Far offshore eastern line boundary
+      ctx.lineTo(lngToX(-70.00), latToY(34.50)); // Dropping deep south into Gulf Stream current tracks
+      ctx.closePath();
+      ctx.clip();
 
-      const linearGradient = ctx.createLinearGradient(lngToX(-75.30), latToY(36.50), lngToX(-72.50), latToY(38.80));
-      linearGradient.addColorStop(0, "rgba(37, 99, 235, 0.45)");
-      linearGradient.addColorStop(0.50, "rgba(22, 163, 74, 0.50)");
-      linearGradient.addColorStop(1, "rgba(234, 88, 12, 0.55)");
+      const linearGradient = ctx.createLinearGradient(lngToX(-75.00), latToY(36.00), lngToX(-70.50), latToY(40.00));
+      linearGradient.addColorStop(0, "rgba(37, 99, 235, 0.45)");  // Inshore Greenish/Blue
+      linearGradient.addColorStop(0.48, "rgba(22, 163, 74, 0.50)"); // Continental Shelf Break Breaklines
+      linearGradient.addColorStop(1, "rgba(220, 38, 38, 0.60)");    // Warm Core Gulf Stream Edge (Crimson)
       
-      ctx.fillStyle = linearGradient; ctx.fillRect(0, 0, 600, 600); ctx.filter = "blur(10px)";
+      ctx.fillStyle = linearGradient; ctx.fillRect(0, 0, 600, 600); ctx.filter = "blur(8px)";
       const thermalImageString = offscreenCanvas.toDataURL();
       sstStaticOverlayRef.current = L.imageOverlay(thermalImageString, sstVisualBounds, { pane: "sstPane", interactive: false });
     }
@@ -145,9 +152,8 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // ── 2. INITIALIZE ASYNCHRONOUS BACKGROUND WEB WORKER THREAD ─────────────
+  // ── LAYER HOOK B: STANDALONE INTEL SYSTEM WORKER INITIALIZATION ──────────
   useEffect(() => {
-    // Instantiate worker thread out-of-line from UI frame updates
     workerRef.current = new Worker(
       new URL("../workers/hotspotEvaluator.worker.ts", import.meta.url),
       { type: "module" }
@@ -169,7 +175,7 @@ export default function FishingMap({
     };
   }, [onHotspotsResolved]);
 
-  // ── 3. ASYNC FETCH & WORKER OFFLOADING OF TELEMETRY DATA ───────────────
+  // ── LAYER HOOK C: TELEMETRY STREAM PARSING ──────────────────────────────
   useEffect(() => {
     let activeScope = true;
     async function loadCloudTelemetry() {
@@ -188,18 +194,17 @@ export default function FishingMap({
             period: b.period?.toString() || "8",
             windSpeed: b.wind?.toString() || "10-15",
             windDirection: `${b.dir || "SW"}`,
-            source: b.activeStation || "NOAA HARMONIC CONSOLE"
+            source: b.activeStation || "NOAA CORE TELEMETRY"
           });
         }
       } catch (err) {
-        console.warn("[Telemetry Failover Intercepted]: Thread safe.", err);
+        console.warn("[Telemetry Failover Activated]: UI frame secure.", err);
       }
     }
     loadCloudTelemetry();
     return () => { activeScope = false; };
   }, []);
 
-  // Dispatch work to the worker thread whenever dependencies change
   useEffect(() => {
     if (workerRef.current) {
       workerRef.current.postMessage({
@@ -211,7 +216,51 @@ export default function FishingMap({
     }
   }, [baselineSst, sstOffset, hotspotDefs]);
 
-  // ── 4. ATOMIC VISIBILITY CONTROLS (NO TEARDOWN RE-MOUNTS) ───────────────
+  // ── LAYER HOOK D: DYNAMIC MAP CLICK TELMETRY ROUTER ─────────────────────
+  // Listens directly for structural shifts in state parameters to keep popup calculations accurate
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    // Remove any previous, stale click listeners to clear memory space
+    map.off("click");
+
+    map.on("click", (e: L.LeafletMouseEvent) => {
+      const clickLat = e.latlng.lat;
+      const clickLng = e.latlng.lng;
+      
+      const computedClickTemp = baselineSst + sstOffset;
+      const loran = toLoranTD(clickLat, clickLng);
+
+      const waveHeight = buoyData ? buoyData.waveHeight : "3.0";
+      const wavePeriod = buoyData ? buoyData.period : "8";
+      const windDirection = buoyData ? buoyData.windDirection : "W";
+      const windSpeed = buoyData ? buoyData.windSpeed : "10-15";
+      const telemetrySource = buoyData ? buoyData.source : "OFFSHORE HARMONIC CONSOLE";
+
+      const badgeColor = telemetrySource.includes("NOAA") ? "#22c55e" : "#64748b";
+
+      L.popup()
+        .setLatLng(e.latlng)
+        .setContent(`
+          <div style="color:#cbd5e1;font-size:11px;min-width:215px;font-family:monospace;line-height:1.5;">
+            <b style="color:#22d3ee;font-size:12px;display:block;margin-bottom:5px;">🎯 Coordinate Telemetry</b>
+            Lat: ${clickLat.toFixed(4)}<br/>
+            Lng: ${clickLng.toFixed(4)}<br/>
+            <span style="color:#fb923c;font-weight:700;">Est Temp: ${computedClickTemp.toFixed(1)}°F</span><br/>
+            <span style="color:#38bdf8;">Waves: ${waveHeight}ft @ ${wavePeriod}s</span><br/>
+            <span style="color:#a78bfa;">Wind : ${windSpeed}kt (${windDirection})</span><br/>
+            <span style="color:#cbd5e1;">TD: W ${loran.w} / X ${loran.x}</span>
+            <div style="font-size:8px;color:${badgeColor};text-align:right;margin-top:6px;font-weight:bold;letter-spacing:0.3px;">📡 SOURCE: ${telemetrySource}</div>
+          </div>
+        `)
+        .openOn(map);
+    });
+
+    return () => { map.off("click"); };
+  }, [baselineSst, sstOffset, buoyData]);
+
+  // ── LAYER HOOK E: ATOMIC VISIBILITY SYNC CONTROLS ───────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -243,7 +292,7 @@ export default function FishingMap({
     }
   }, [showBathy, showSST, showWeather]);
 
-  // ── 5. ASYNCHRONOUS PLOT CARD INJECTION ─────────────────────────────────
+  // ── LAYER HOOK F: ASYNCHRONOUS MARKER PLOTS ──────────────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -262,7 +311,7 @@ export default function FishingMap({
       circle.bindPopup(`
         <div style="color:#cbd5e1;font-size:12px;min-width:200px;font-family:monospace;">
           <b style="color:${color}; font-size:13px; display:block; margin-bottom:2px;">${h.title}</b>
-          🌡 <span style="color:#fb923c">${h.sstTemp.toFixed(1)}°F</span><br/>
+          Examined Temp: <span style="color:#fb923c">${h.sstTemp.toFixed(1)}°F</span><br/>
           📡 LORAN W ${h.loran?.w || "--"} / X ${h.loran?.x || "--"}
         </div>
       `);
