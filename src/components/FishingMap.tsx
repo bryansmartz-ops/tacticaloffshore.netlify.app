@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Non-Blocking Asynchronous Mapping Deck - 100% Data-Driven Edition
+// High-Fidelity Non-Blocking Asynchronous Mapping Deck - Fully Synchronized Thermal Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -99,28 +99,40 @@ export default function FishingMap({
   const navAnchorMarkerRef = useRef<L.Marker | null>(null);
   const navPolylineRef = useRef<L.Polyline | null>(null);
 
-  // Fallback structural trend fallback logic for canvas backdrop gradients only
-  const getInterpolatedSstAtNode = (lat: number, lng: number, baseTemp: number, offset: number): number => {
-    let baseCoastLng = -75.5;
-    if (lat < 35.2) {
-      baseCoastLng = -75.47 - (35.2 - lat) * 0.8; 
-    } else if (lat >= 35.2 && lat < 38.5) {
-      baseCoastLng = -75.52 + (lat - 35.2) * 0.44 + Math.sin((lat - 35.2) * 1.4) * 0.18; 
-    } else {
-      baseCoastLng = -74.85 + (lat - 38.5) * 0.22 - Math.cos((lat - 38.5) * 1.9) * 0.12; 
-    }
-    const shelfDistance = lng - baseCoastLng;
-    const shelfSlope = (lat - 38.3) * 1.5 + (lng + 74.2) * 2.8;
-    return Math.max(58.0, Math.min(86.5, baseTemp - 2.0 + (shelfDistance * 5.8) - (shelfSlope * 0.35))) + offset;
+  // Unified master mapping scale locking absolute hex codes to hard temp ranges
+  const getDynamicHexColorFromTemp = (tempF: number): string => {
+    if (tempF >= 82.0) return "rgba(185, 28, 28, 0.65)";   // Crimson Hot (Gulf Stream Core)
+    if (tempF >= 78.0) return "rgba(220, 38, 38, 0.58)";   // Deep Red
+    if (tempF >= 74.0) return "rgba(234, 88, 12, 0.52)";   // Orange (Main Temperature Breaks)
+    if (tempF >= 70.0) return "rgba(250, 204, 21, 0.48)"   // Yellow/Orange Transition
+    if (tempF >= 65.0) return "rgba(22, 163, 74, 0.45)";   // Green (Cool Inshore Shelf)
+    return "rgba(37, 99, 235, 0.45)";                      // Blue (Cold Bottom Water)
   };
 
-  const getDynamicHexColorFromTemp = (tempF: number): string => {
-    if (tempF >= 82.0) return "rgba(185, 28, 28, 0.65)";   
-    if (tempF >= 78.0) return "rgba(220, 38, 38, 0.58)";   
-    if (tempF >= 74.0) return "rgba(234, 88, 12, 0.52)";   
-    if (tempF >= 70.0) return "rgba(250, 204, 21, 0.48)";  
-    if (tempF >= 65.0) return "rgba(22, 163, 74, 0.45)";   
-    return "rgba(37, 99, 235, 0.45)";                      
+  // Helper handling direct Inverse Distance Weighting to resolve temperatures across space cleanly
+  const resolveBlendedDataTemp = (lat: number, lng: number, fallbackBase: number, currentOffset: number, hotspotsList: HotspotDisplay[]): number => {
+    let computedTemp = fallbackBase + currentOffset;
+    let totalWeight = 0;
+    let weightedTempSum = 0;
+
+    if (hotspotsList && hotspotsList.length > 0) {
+      for (let i = 0; i < hotspotsList.length; i++) {
+        const spot = hotspotsList[i];
+        const distance = haversineNm(spot.lat, spot.lng, lat, lng);
+        if (distance < 1.5) {
+          return spot.sstTemp; 
+        }
+        if (distance > 0) {
+          const weight = 1 / Math.pow(distance, 2);
+          totalWeight += weight;
+          weightedTempSum += spot.sstTemp * weight;
+        }
+      }
+      if (totalWeight > 0) {
+        computedTemp = weightedTempSum / totalWeight;
+      }
+    }
+    return computedTemp;
   };
 
   // ── LAYER HOOK A: INITIALIZE MAP CANVAS INSTANCE EXACTLY ONCE ───────────
@@ -215,7 +227,7 @@ export default function FishingMap({
     }
   }, [baselineSst, sstOffset, hotspotDefs]);
 
-  // ── CANVAS BACKGROUND GRADIENT GENERATOR ─────────────────────────────────
+  // ── FIXED CANVAS LAYER BACKGROUND GENERATOR: 100% DATA SYNCHRONIZED ──────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -239,9 +251,10 @@ export default function FishingMap({
       ctx.lineTo(lngToX(-73.95), latToY(40.50)); ctx.lineTo(lngToX(-70.00), latToY(41.00)); 
       ctx.lineTo(lngToX(-70.00), latToY(34.50)); ctx.closePath(); ctx.clip();
 
-      const tempInshoreCool = getInterpolatedSstAtNode(38.0, -75.5, baselineSst, sstOffset);
-      const tempMidShelfBreak = getInterpolatedSstAtNode(38.0, -73.5, baselineSst, sstOffset);
-      const tempOffshoreGulf   = getInterpolatedSstAtNode(38.0, -70.5, baselineSst, sstOffset);
+      // Core synchronization: Evaluates true data matrix points across a West-to-East path vector
+      const tempInshoreCool   = resolveBlendedDataTemp(38.0, -75.5, baselineSst, sstOffset, liveHotspots);
+      const tempMidShelfBreak = resolveBlendedDataTemp(38.0, -73.5, baselineSst, sstOffset, liveHotspots);
+      const tempOffshoreGulf  = resolveBlendedDataTemp(38.0, -70.5, baselineSst, sstOffset, liveHotspots);
 
       const linearGradient = ctx.createLinearGradient(lngToX(-75.50), latToY(38.00), lngToX(-70.50), latToY(38.00));
       linearGradient.addColorStop(0, getDynamicHexColorFromTemp(tempInshoreCool));   
@@ -253,9 +266,9 @@ export default function FishingMap({
       sstStaticOverlayRef.current = L.imageOverlay(thermalImageString, sstVisualBounds, { pane: "sstPane", interactive: false });
       if (showSST) sstStaticOverlayRef.current.addTo(map);
     }
-  }, [baselineSst, sstOffset, showSST]);
+  }, [baselineSst, sstOffset, showSST, liveHotspots]);
 
-  // ── LAYER HOOK D: 100% DATA-DRIVEN MAP CLICK TELEMETRY ROUTER ────────────
+  // ── LAYER HOOK D: AUTOMATIC ISOLATED MODE INTERCEPTOR ────────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -274,35 +287,11 @@ export default function FishingMap({
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
       
-      // 1. Evaluate True Ingested NOAA Matrix (IDW Blending Loop)
-      let computedClickTemp = baselineSst + sstOffset; 
-      let totalWeight = 0;
-      let weightedTempSum = 0;
-
-      if (liveHotspots && liveHotspots.length > 0) {
-        liveHotspots.forEach((spot) => {
-          const distance = haversineNm(spot.lat, spot.lng, clickLat, clickLng);
-          // Snap threshold: 1.5 miles inside a structural reading uses pure station data
-          if (distance < 1.5) {
-            computedClickTemp = spot.sstTemp;
-            totalWeight = -1;
-          }
-          if (totalWeight !== -1 && distance > 0) {
-            const weight = 1 / Math.pow(distance, 2);
-            totalWeight += weight;
-            weightedTempSum += spot.sstTemp * weight;
-          }
-        });
-
-        if (totalWeight > 0 && totalWeight !== -1) {
-          computedClickTemp = weightedTempSum / totalWeight;
-        }
-      }
-
+      // Pull true data temperature profile directly via global interpolation helper
+      const computedClickTemp = resolveBlendedDataTemp(clickLat, clickLng, baselineSst, sstOffset, liveHotspots);
       const rangeToOcInlet = haversineNm(OC_INLET.lat, OC_INLET.lng, clickLat, clickLng);
       let plotterHtmlLine = "";
 
-      // 2. Leg Navigation Plotting Calculations
       if (isPlotterArmed) {
         if (navPolylineRef.current && !navAnchorRef.current) {
           map.removeLayer(navPolylineRef.current);
@@ -357,7 +346,6 @@ export default function FishingMap({
         }
       }
 
-      // 3. Proximity text calculation to identify target positions
       let closestCanyonText = "Open Ocean Grid";
       let minCanyonDist = 9999;
       CANYONS.forEach((c) => {
