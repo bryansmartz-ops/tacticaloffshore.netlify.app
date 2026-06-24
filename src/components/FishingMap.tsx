@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Non-Blocking Asynchronous Mapping Deck - Extended Offshore Edition
+// High-Fidelity Non-Blocking Asynchronous Mapping Deck - Dynamic Thermal Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -82,6 +82,34 @@ export default function FishingMap({
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
+  // Helper helper to interpolate temperature across specific coordinates
+  const getInterpolatedSstAtNode = (lat: number, lng: number, baseTemp: number, offset: number): number => {
+    let baseCoastLng = -75.5;
+    if (lat < 35.2) {
+      baseCoastLng = -75.47 - (35.2 - lat) * 0.8; 
+    } else if (lat >= 35.2 && lat < 38.5) {
+      baseCoastLng = -75.52 + (lat - 35.2) * 0.44 + Math.sin((lat - 35.2) * 1.4) * 0.18; 
+    } else {
+      baseCoastLng = -74.85 + (lat - 38.5) * 0.22 - Math.cos((lat - 38.5) * 1.9) * 0.12; 
+    }
+    const shelfDistance = lng - baseCoastLng;
+    const shelfSlope = (lat - 38.3) * 1.5 + (lng + 74.2) * 2.8;
+    const fluidWaves = Math.sin(lat * 5.5 + lng * 3.5) * 1.4 + Math.cos(lng * 7.5 - lat * 2.5) * 1.1;
+    
+    let interpolatedSst = (baseTemp - 2.0) + (shelfDistance * 5.8) - (shelfSlope * 0.35) + fluidWaves;
+    return Math.max(58.0, Math.min(86.5, interpolatedSst)) + offset;
+  };
+
+  // Helper helper to convert temperature values to hex colors matching your legend key
+  const getDynamicHexColorFromTemp = (tempF: number): string => {
+    if (tempF >= 82.0) return "rgba(185, 28, 28, 0.65)";   // Crimson Hot (Gulf Stream Core)
+    if (tempF >= 78.0) return "rgba(220, 38, 38, 0.58)";   // Deep Red
+    if (tempF >= 74.0) return "rgba(234, 88, 12, 0.52)";   // Orange (Main Temperature Breaks)
+    if (tempF >= 70.0) return "rgba(250, 204, 21, 0.48)";  // Yellow 
+    if (tempF >= 65.0) return "rgba(22, 163, 74, 0.45)";   // Green (Cooler Inshore Water)
+    return "rgba(37, 99, 235, 0.45)";                      // Blue (Cold Bottom Water)
+  };
+
   // ── LAYER HOOK A: INITIALIZE MAP CANVAS INSTANCE EXACTLY ONCE ───────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -105,48 +133,6 @@ export default function FishingMap({
     bathyBaseLayerRef.current = L.tileLayer(BATHY_BASE_TILE, { maxNativeZoom: 10, maxZoom: 14, opacity: 0.55, pane: "bathyBasePane" });
     bathyOverlayLayerRef.current = L.tileLayer(BATHY_OVERLAY_TILE, { maxNativeZoom: 10, maxZoom: 14, opacity: 0.45, pane: "bathyOverlayPane" });
     weatherLayerRef.current = L.tileLayer(WEATHER_WAVE_TILE, { maxZoom: 12, opacity: 0.65, pane: "weatherPane" });
-
-    // ── EXPANDED REGIONAL OFFSHORE BOUNDS CLIPPING MASK ───────────────────
-    // Expanded limits: North to 41.0°N (NJ/NY Bight), East out to -70.0°W (250+ NM out into the Gulf Stream)
-    const sstVisualBounds: L.LatLngBoundsExpression = [[34.5, -76.5], [41.0, -70.0]];
-    const offscreenCanvas = document.createElement("canvas");
-    offscreenCanvas.width = 600;
-    offscreenCanvas.height = 600;
-    const ctx = offscreenCanvas.getContext("2d");
-    
-    if (ctx) {
-      ctx.clearRect(0, 0, 600, 600);
-      // Recalibrated scale nodes to stretch calculations across the new broad coordinate grid
-      const latToY = (lat: number) => (1.0 - (lat - 34.5) / (41.0 - 34.5)) * 600;
-      const lngToX = (lng: number) => ((lng - (-76.5)) / (-70.0 - (-76.5))) * 600;
-
-      ctx.beginPath();
-      ctx.moveTo(lngToX(-75.51), latToY(35.22)); // Cape Hatteras Node
-      ctx.lineTo(lngToX(-75.95), latToY(36.85)); // Virginia Coast
-      ctx.lineTo(lngToX(-75.05), latToY(38.35)); // Ocean City Inlet baseline
-      ctx.lineTo(lngToX(-74.25), latToY(39.50)); // New Jersey coastline tracking point
-      ctx.lineTo(lngToX(-73.95), latToY(40.50)); // Up to NY/Long Island approaches
-      ctx.lineTo(lngToX(-70.00), latToY(41.00)); // Far offshore eastern line boundary
-      ctx.lineTo(lngToX(-70.00), latToY(34.50)); // Dropping deep south into Gulf Stream current tracks
-      ctx.closePath();
-      ctx.clip();
-
-      const linearGradient = ctx.createLinearGradient(lngToX(-75.00), latToY(36.00), lngToX(-70.50), latToY(40.00));
-      linearGradient.addColorStop(0, "rgba(37, 99, 235, 0.45)");  // Inshore Greenish/Blue
-      linearGradient.addColorStop(0.48, "rgba(22, 163, 74, 0.50)"); // Continental Shelf Break Breaklines
-      linearGradient.addColorStop(1, "rgba(220, 38, 38, 0.60)");    // Warm Core Gulf Stream Edge (Crimson)
-      
-      ctx.fillStyle = linearGradient; ctx.fillRect(0, 0, 600, 600); ctx.filter = "blur(8px)";
-      const thermalImageString = offscreenCanvas.toDataURL();
-      sstStaticOverlayRef.current = L.imageOverlay(thermalImageString, sstVisualBounds, { pane: "sstPane", interactive: false });
-    }
-
-    CANYONS.forEach((c) => {
-      L.marker([c.lat, c.lng], {
-        pane: "labelPane", interactive: false,
-        icon: L.divIcon({ className: "", html: `<div style="color:#fff;font-size:10px;font-weight:700;white-space:nowrap;text-shadow:0 0 3px #000">${c.name}</div>`, iconAnchor: [30, 5] }),
-      }).addTo(map);
-    });
 
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
@@ -216,8 +202,62 @@ export default function FishingMap({
     }
   }, [baselineSst, sstOffset, hotspotDefs]);
 
+  // ── DYNAMIC POLY-POINT CANVAS COLOR GENERATOR ────────────────────────────
+  // Triggers updates automatically when temperature updates arrive from your background thread
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    if (sstStaticOverlayRef.current) {
+      map.removeLayer(sstStaticOverlayRef.current);
+    }
+
+    const sstVisualBounds: L.LatLngBoundsExpression = [[34.5, -76.5], [41.0, -70.0]];
+    const offscreenCanvas = document.createElement("canvas");
+    offscreenCanvas.width = 600;
+    offscreenCanvas.height = 600;
+    const ctx = offscreenCanvas.getContext("2d");
+    
+    if (ctx) {
+      ctx.clearRect(0, 0, 600, 600);
+      const latToY = (lat: number) => (1.0 - (lat - 34.5) / (41.0 - 34.5)) * 600;
+      const lngToX = (lng: number) => ((lng - (-76.5)) / (-70.0 - (-76.5))) * 600;
+
+      ctx.beginPath();
+      ctx.moveTo(lngToX(-75.51), latToY(35.22)); 
+      ctx.lineTo(lngToX(-75.95), latToY(36.85)); 
+      ctx.lineTo(lngToX(-75.05), latToY(38.35)); 
+      ctx.lineTo(lngToX(-74.25), latToY(39.50)); 
+      ctx.lineTo(lngToX(-73.95), latToY(40.50)); 
+      ctx.lineTo(lngToX(-70.00), latToY(41.00)); 
+      ctx.lineTo(lngToX(-70.00), latToY(34.50)); 
+      ctx.closePath();
+      ctx.clip();
+
+      // Resolve regional node temperatures dynamically
+      const tempSouthOffshore = getInterpolatedSstAtNode(35.0, -71.5, baselineSst, sstOffset);
+      const tempMidShelfBreak = getInterpolatedSstAtNode(38.0, -74.0, baselineSst, sstOffset);
+      const tempNorthInshore  = getInterpolatedSstAtNode(40.5, -73.8, baselineSst, sstOffset);
+
+      const linearGradient = ctx.createLinearGradient(lngToX(-75.20), latToY(36.20), lngToX(-70.50), latToY(40.20));
+      linearGradient.addColorStop(0, getDynamicHexColorFromTemp(tempSouthOffshore));  
+      linearGradient.addColorStop(0.46, getDynamicHexColorFromTemp(tempMidShelfBreak)); 
+      linearGradient.addColorStop(1, getDynamicHexColorFromTemp(tempNorthInshore));   
+      
+      ctx.fillStyle = linearGradient; 
+      ctx.fillRect(0, 0, 600, 600); 
+      ctx.filter = "blur(8px)";
+      
+      const thermalImageString = offscreenCanvas.toDataURL();
+      sstStaticOverlayRef.current = L.imageOverlay(thermalImageString, sstVisualBounds, { pane: "sstPane", interactive: false });
+      
+      if (showSST) {
+        sstStaticOverlayRef.current.addTo(map);
+      }
+    }
+  }, [baselineSst, sstOffset, showSST]);
+
   // ── LAYER HOOK D: DYNAMIC MAP CLICK TELEMETRY ROUTER ─────────────────────
-  // Computes precise, geographically variable SST profiles based on touch coordinate inputs
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -228,29 +268,13 @@ export default function FishingMap({
       const clickLat = e.latlng.lat;
       const clickLng = e.latlng.lng;
       
-      // ── SYSTEMATIC THERMAL INTERPOLATION CALCULATOR ──────────────────────
-      // Models the natural shelf slope warming as you step offshore into deep canyon structures
-      let baseCoastLng = -75.5;
-      if (clickLat < 35.2) {
-        baseCoastLng = -75.47 - (35.2 - clickLat) * 0.8; 
-      } else if (clickLat >= 35.2 && clickLat < 38.5) {
-        baseCoastLng = -75.52 + (clickLat - 35.2) * 0.44 + Math.sin((clickLat - 35.2) * 1.4) * 0.18; 
-      } else {
-        baseCoastLng = -74.85 + (clickLat - 38.5) * 0.22 - Math.cos((clickLat - 38.5) * 1.9) * 0.12; 
-      }
-
-      const shelfDistance = clickLng - baseCoastLng;
-      const shelfSlope = (clickLat - 38.3) * 1.5 + (clickLng + 74.2) * 2.8;
-      const fluidWaves = Math.sin(clickLat * 5.5 + clickLng * 3.5) * 1.4 + Math.cos(clickLng * 7.5 - clickLat * 2.5) * 1.1;
-      
-      let interpolatedSst = (baselineSst - 2.0) + (shelfDistance * 5.8) - (shelfSlope * 0.35) + fluidWaves;
-      let computedClickTemp = Math.max(58.0, Math.min(84.5, interpolatedSst)) + sstOffset;
+      let computedClickTemp = getInterpolatedSstAtNode(clickLat, clickLng, baselineSst, sstOffset);
 
       // Resync edge break wall extremes for target zones
       if (clickLat >= 37.35 && clickLat <= 37.65 && clickLng >= -74.50 && clickLng <= -74.15) {
-        computedClickTemp = baselineSst + 1.9 + sstOffset; // Washington Core
+        computedClickTemp = baselineSst + 1.9 + sstOffset; 
       } else if (clickLat >= 37.75 && clickLat <= 38.00 && clickLng >= -74.30 && clickLng <= -73.95) {
-        computedClickTemp = baselineSst + 1.3 + sstOffset; // Poormans Core
+        computedClickTemp = baselineSst + 1.3 + sstOffset; 
       }
 
       const loran = toLoranTD(clickLat, clickLng);
@@ -304,15 +328,7 @@ export default function FishingMap({
         if (map.hasLayer(weatherLayerRef.current)) map.removeLayer(weatherLayerRef.current);
       }
     }
-
-    if (sstStaticOverlayRef.current) {
-      if (showSST) {
-        if (!map.hasLayer(sstStaticOverlayRef.current)) map.addLayer(sstStaticOverlayRef.current);
-      } else {
-        if (map.hasLayer(sstStaticOverlayRef.current)) map.removeLayer(sstStaticOverlayRef.current);
-      }
-    }
-  }, [showBathy, showSST, showWeather]);
+  }, [showBathy, showWeather]);
 
   // ── LAYER HOOK F: ASYNCHRONOUS MARKER PLOTS ──────────────────────────────
   useEffect(() => {
