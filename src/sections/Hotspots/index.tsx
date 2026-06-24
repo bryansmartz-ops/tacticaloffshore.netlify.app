@@ -1,4 +1,8 @@
-import { useState, useCallback, useEffect } from "react";
+// src/sections/Hotspots/index.tsx
+// High-Fidelity Non-Blocking Intel Deck - Plotted Mode Controller
+// ──────────────────────────────────────────────────────────────────────────────────────
+
+import { useState, useCallback, useEffect, useMemo } from "react";
 import {
   Target,
   Flame,
@@ -7,10 +11,10 @@ import {
   Navigation,
   ChevronDown,
   ChevronUp,
-  RefreshCw,
   AlertTriangle,
   Layers,
-  History
+  History,
+  Compass
 } from "lucide-react";
 import FishingMap from "../../components/FishingMap";
 import type { HotspotDisplay } from "../../components/FishingMap";
@@ -24,11 +28,10 @@ import {
   speciesFromSST,
 } from "../../lib/hotspots";
 
-// Isolated visual guard to prevent silent runtime style compilation failures
 function getLocalConfidenceColor(score: number): string {
-  if (score >= 80) return "#34d399"; // emerald-400
-  if (score >= 65) return "#fbbf24"; // amber-400
-  return "#f87171"; // red-400
+  if (score >= 80) return "#34d399"; 
+  if (score >= 65) return "#fbbf24"; 
+  return "#f87171"; 
 }
 
 export default function Hotspots() {
@@ -36,15 +39,14 @@ export default function Hotspots() {
   const [showMap, setShowMap] = useState(true);
   const [flyTo, setFlyTo] = useState<{ lat: number; lng: number; zoom?: number } | undefined>();
 
-  // ─── Toggles & Timeline Playback States ────────────────────────────────────
   const [showHotspots, setShowHotspots] = useState(true);
-  const [showSST, setShowSST] = useState(true);
+  const [showSST, setShowSST} = useState(true);
   const [showBathy, setShowBathy] = useState(true);
   const [showWeather, setShowWeather] = useState(false); 
   const [sstOffset, setSstOffset] = useState<number>(0); 
   const [showControls, setShowControls] = useState(false);
+  const [isPlotterArmed, setIsPlotterArmed] = useState(false); // Master Plotting Toggle State
 
-  // Live-resolved data frameworks — Executed properly as functional hooks to prevent UI crashes
   const [liveHotspots, setLiveHotspots] = useState<HotspotDisplay[]>([]);
   const [sstDate] = useState<string>(() => gibsSSTDate(3));
   const [cacheAge, setCacheAge] = useState<number | null>(() => getCacheAge());
@@ -57,126 +59,124 @@ export default function Hotspots() {
     new Set(dynamicDefs.map((h) => h.id))
   );
 
-  // ─── Explicit Core Target Synchronization ──────────────────────────────────
   useEffect(() => {
-    fetch("/.netlify/functions/get-latest-brief")
-      .then((res) => {
-        if (!res.ok) throw new Error("Endpoint standby mode");
-        return res.json();
-      })
+    let activeScope = true;
+    fetch("/.netlify/functions/get-latest-briefs")
+      .then((res) => res.ok ? res.json() : Promise.reject())
       .then((data) => {
-        if (data && data.primary_lat) {
-          setDynamicDefs((prevDefs) =>
-            prevDefs.map((def) => {
-              if (def.id === "1") {
-                const liveSignals = buildHotspotSignals(data.live_sst_value, data.live_break_delta, {
-                  ...def,
-                  lat: data.primary_lat,
-                  lng: data.primary_lng,
-                });
-                return {
-                  ...def,
-                  lat: data.primary_lat,
-                  lng: data.primary_lng,
-                  liveSst: data.live_sst_value,
-                  liveBreak: data.live_break_delta,
-                  liveConfidence: Math.max(92, computeConfidence(liveSignals)),
-                  liveSignals,
-                  isPrimaryAI: true,
-                };
-              }
+        if (!activeScope || !data) return;
+        
+        setDynamicDefs((prevDefs) =>
+          prevDefs.map((def) => {
+            if (def.id === "1" && data.primary_lat) {
+              const liveSignals = buildHotspotSignals(data.live_sst_value, data.live_break_delta, {
+                ...def,
+                lat: data.primary_lat,
+                lng: data.primary_lng,
+              });
+              return {
+                ...def,
+                lat: data.primary_lat,
+                lng: data.primary_lng,
+                liveSst: data.live_sst_value,
+                liveBreak: data.live_break_delta,
+                liveConfidence: Math.max(92, computeConfidence(liveSignals)),
+                liveSignals,
+                isPrimaryAI: true,
+              };
+            }
 
-              if (def.id === "2" && data.secondary_lat) {
-                const secondarySst = Math.max(60, data.live_sst_value - 1.0);
-                const secondaryBreak = Math.max(0, data.live_break_delta - 0.4);
-                
-                const liveSignals = buildHotspotSignals(secondarySst, secondaryBreak, {
-                  ...def,
-                  lat: data.secondary_lat,
-                  lng: data.secondary_lng,
-                });
-                return {
-                  ...def,
-                  lat: data.secondary_lat,
-                  lng: data.secondary_lng,
-                  liveSst: secondarySst,
-                  liveBreak: secondaryBreak,
-                  liveConfidence: Math.max(86, computeConfidence(liveSignals)),
-                  liveSignals,
-                  isSecondaryAI: true,
-                };
-              }
-
-              return def;
-            })
-          );
-        }
+            if (def.id === "2" && data.secondary_lat) {
+              const secondarySst = Math.max(60, data.live_sst_value - 1.0);
+              const secondaryBreak = Math.max(0, data.live_break_delta - 0.4);
+              const liveSignals = buildHotspotSignals(secondarySst, secondaryBreak, {
+                ...def,
+                lat: data.secondary_lat,
+                lng: data.secondary_lng,
+              });
+              return {
+                ...def,
+                lat: data.secondary_lat,
+                lng: data.secondary_lng,
+                liveSst: secondarySst,
+                liveBreak: secondaryBreak,
+                liveConfidence: Math.max(86, computeConfidence(liveSignals)),
+                liveSignals,
+                isSecondaryAI: true,
+              };
+            }
+            return def;
+          })
+        );
       })
-      .catch((err) => console.warn("[hotspots] Core targets pipeline deferred:", err));
+      .catch((err) => console.warn("[Hotspots Container] Telemetry standby active.", err));
+
+    return () => { activeScope = false; };
   }, []);
 
   const handleHotspotsResolved = useCallback((hotspots: HotspotDisplay[]) => {
-    const compiled = hotspots.map((satHot) => {
-      const match = dynamicDefs.find((d) => d.id === satHot.id);
-      if (match && match.liveSst) {
-        return {
-          ...satHot,
-          lat: match.lat,
-          lng: match.lng,
-          sstTemp: match.liveSst,
-          breakDelta: match.liveBreak,
-          confidence: match.liveConfidence,
-          signals: match.liveSignals,
-          species: speciesFromSST(match.liveSst),
-        };
-      }
-      return satHot;
+    setLiveHotspots((prev) => {
+      const matchFound = hotspots.some(h => {
+        const existing = prev.find(p => p.id === h.id);
+        return !existing || existing.sstTemp !== h.sstTemp || existing.confidence !== h.confidence;
+      });
+      if (!matchFound && prev.length === hotspots.length) return prev;
+
+      return hotspots.map((satHot) => {
+        const match = dynamicDefs.find((d) => d.id === satHot.id);
+        if (match && match.liveSst) {
+          return {
+            ...satHot,
+            lat: match.lat,
+            lng: match.lng,
+            sstTemp: match.liveSst,
+            breakDelta: match.liveBreak,
+            confidence: match.liveConfidence,
+            signals: match.liveSignals,
+            species: speciesFromSST(match.liveSst),
+          };
+        }
+        return satHot;
+      });
     });
 
-    setLiveHotspots(compiled);
-    setLoadingIds(new Set()); 
+    setLoadingIds((prev) => prev.size === 0 ? prev : new Set()); 
     setCacheAge(getCacheAge());
   }, [dynamicDefs]);
 
-  const handleHotspotClick = useCallback(
-    (id: string) => {
-      setSelectedId((prev) => (prev === id ? null : id));
-      const h = dynamicDefs.find((x) => x.id === id) ?? liveHotspots.find((x) => x.id === id);
-      if (h) setFlyTo({ lat: h.lat, lng: h.lng, zoom: 9 });
-    },
-    [dynamicDefs, liveHotspots],
-  );
+  const handleHotspotClick = useCallback((id: string) => {
+    setSelectedId((prev) => (prev === id ? null : id));
+    const h = dynamicDefs.find((x) => x.id === id) ?? liveHotspots.find((x) => x.id === id);
+    if (h) setFlyTo({ lat: h.lat, lng: h.lng, zoom: 9 });
+  }, [dynamicDefs, liveHotspots]);
 
   const fetchesDone = loadingIds.size === 0;
   const allSatelliteUnavailable = fetchesDone && liveHotspots.length === 0;
 
-  const displayHotspots: HotspotDisplay[] = fetchesDone
-    ? [...liveHotspots].sort((a, b) => b.confidence - a.confidence)
-    : dynamicDefs.map((h) => ({
-        id: h.id,
-        title: h.title,
-        confidence: h.liveConfidence ?? 50,
-        sstTemp: h.liveSst ?? h.fallbackSstF,
-        breakDelta: h.liveBreak ?? 0,
-        lat: h.lat,
-        lng: h.lng,
-        species: h.liveSst ? speciesFromSST(h.liveSst) : [],
-        isFallbackSst: !h.liveSst,
-        signals: h.liveSignals ?? {
-          sstScore: 0,
-          sstBreakScore: 0,
-          chloroScore: 0,
-          altimetryScore: 0,
-          historyReportsScore: 0,
-        },
-      }));
+  const displayHotspots = useMemo(() => {
+    if (fetchesDone) {
+      return [...liveHotspots].sort((a, b) => b.confidence - a.confidence);
+    }
+    return dynamicDefs.map((h) => ({
+      id: h.id,
+      title: h.title,
+      distanceLabel: h.distanceLabel,
+      confidence: h.liveConfidence ?? 50,
+      sstTemp: h.liveSst ?? h.fallbackSstF,
+      breakDelta: h.liveBreak ?? 0,
+      lat: h.lat,
+      lng: h.lng,
+      species: h.liveSst ? speciesFromSST(h.liveSst) : [],
+      isFallbackSst: !h.liveSst,
+      signals: h.liveSignals ?? {
+        sstScore: 0, sstBreakScore: 0, chloroScore: 0, altimetryScore: 0, historyReportsScore: 0,
+      },
+    }));
+  }, [fetchesDone, liveHotspots, dynamicDefs]);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)] overflow-hidden">
-      {/* ── Map panel ────────────────────────────────────────────────────── */}
-      <div
-        className={`relative transition-all duration-300 flex-shrink-0 ${showMap ? "h-[45%]" : "h-0 overflow-hidden"}`}
-      >
+    <div className="flex flex-col h-[calc(100vh-8rem)] overflow-hidden bg-slate-950">
+      <div className={`relative transition-all duration-300 flex-shrink-0 ${showMap ? "h-[45%]" : "h-0 overflow-hidden"}`}>
         <FishingMap
           mode="preview"
           hotspotDefs={dynamicDefs}
@@ -185,6 +185,7 @@ export default function Hotspots() {
           sstOffset={sstOffset}
           showBathy={showBathy}
           showWeather={showWeather}
+          isPlotterArmed={isPlotterArmed} // Pushes active toggling mode directly down to Leaflet
           onHotspotClick={handleHotspotClick}
           onHotspotsResolved={handleHotspotsResolved}
           flyTo={flyTo}
@@ -198,6 +199,19 @@ export default function Hotspots() {
             className="bg-slate-900/90 border border-slate-700 text-slate-200 p-2 rounded-xl shadow-xl flex items-center justify-center backdrop-blur-sm"
           >
             <Layers className="w-4 h-4" />
+          </button>
+
+          {/* Master Operational Navigation Arm Button */}
+          <button
+            onClick={() => setIsPlotterArmed((prev) => !prev)}
+            className={`border p-2 rounded-xl shadow-xl flex items-center justify-center backdrop-blur-sm transition-all ${
+              isPlotterArmed 
+                ? "bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-cyan-500/10" 
+                : "bg-slate-900/90 border-slate-700 text-slate-400 hover:text-slate-200"
+            }`}
+            title={isPlotterArmed ? "Deactivate Leg Plotter" : "Arm Leg Plotter"}
+          >
+            <Compass className={`w-4 h-4 ${isPlotterArmed ? "animate-pulse" : ""}`} />
           </button>
 
           {showControls && (
@@ -277,7 +291,7 @@ export default function Hotspots() {
         </button>
       )}
 
-      {/* ── Card list ────────────────────────────────────────────────────── */}
+      {/* ── Card List ────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold text-white flex items-center gap-2">
@@ -299,55 +313,35 @@ export default function Hotspots() {
         </div>
 
         <p className="text-xs text-slate-500">
-          SST from NOAA CoastWatch ERDDAP · ACSPO L3S 0.02° / MUR NRT 0.01° ·
-          GIBS {sstDate} · Cached hourly · Tap card to pan map
+          SST from NOAA CoastWatch ERDDAP · ACSPO L3S 0.02° · Cached hourly
         </p>
 
         {allSatelliteUnavailable && (
           <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
             <AlertTriangle className="w-10 h-10 text-amber-500 opacity-70" />
-            <div className="text-amber-400 font-semibold text-base">
-              No satellite SST available
-            </div>
-            <p className="text-slate-500 text-sm max-w-xs">
-              ERDDAP returned no valid pixels for any hotspot location. Hotspot
-              predictions require live satellite data and cannot be shown using
-              hardcoded fallback temperatures.
-            </p>
+            <div className="text-amber-400 font-semibold text-base">No satellite SST available</div>
           </div>
         )}
 
         {displayHotspots.map((h) => {
           const td = toLoranTD(h.lat, h.lng);
           const isSelected = selectedId === h.id;
-          const isLoading = loadingIds.has(h.id);
           const def = dynamicDefs.find((d) => d.id === h.id);
-          const hasLiveSST = !isLoading;
 
           return (
             <div
               key={h.id}
               onClick={() => handleHotspotClick(h.id)}
               className={`bg-slate-800 rounded-xl p-4 border transition-all cursor-pointer space-y-2 ${
-                isSelected
-                  ? "border-emerald-500/60 shadow-lg shadow-emerald-900/20"
-                  : "border-slate-700"
+                isSelected ? "border-emerald-500/60 shadow-lg shadow-emerald-900/20" : "border-slate-700"
               }`}
             >
               <div className="flex items-start justify-between">
                 <div>
-                  <h3 className="font-semibold text-white flex items-center gap-2">
+                  <h3 className="font-semibold text-white flex items-center gap-2 text-sm">
                     {h.distanceLabel ?? h.title}
-                    {def?.isPrimaryAI && (
-                      <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded uppercase tracking-wide">
-                        PRIMARY TARGET
-                      </span>
-                    )}
-                    {def?.isSecondaryAI && (
-                      <span className="text-[9px] font-bold bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded uppercase tracking-wide">
-                        SECONDARY TARGET
-                      </span>
-                    )}
+                    {def?.isPrimaryAI && <span className="text-[9px] font-bold bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded uppercase">PRIMARY</span>}
+                    {def?.isSecondaryAI && <span className="text-[9px] font-bold bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded uppercase">SECONDARY</span>}
                   </h3>
                   <div className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
                     <MapPin className="w-3 h-3" />
@@ -355,56 +349,24 @@ export default function Hotspots() {
                   </div>
                 </div>
                 <div className="text-right">
-                  {isLoading ? (
-                    <div className="flex items-center gap-1 text-slate-400 justify-end">
-                      <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span className="text-xs">scoring…</span>
-                    </div>
-                  ) : (
-                    <>
-                      <div
-                        className="text-lg font-bold"
-                        style={{ color: getLocalConfidenceColor(h.confidence) }}
-                      >
-                        {h.confidence}%
-                      </div>
-                      <div className="text-xs text-slate-500">confidence</div>
-                    </>
-                  )}
+                  <div className="text-lg font-bold" style={{ color: getLocalConfidenceColor(h.confidence) }}>{h.confidence}%</div>
+                  <div className="text-[10px] text-slate-500">confidence</div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-4 text-sm flex-wrap">
+              <div className="flex items-center gap-4 text-xs flex-wrap">
                 <div className="flex items-center gap-1">
-                  {isLoading ? (
-                    <span className="flex items-center gap-1 text-slate-400">
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span className="text-xs">fetching SST…</span>
-                    </span>
-                  ) : (
-                    <>
-                      <ThermometerSun className="w-4 h-4 text-orange-400" />
-                      <span className={hasLiveSST ? "text-orange-400" : "text-slate-400"}>
-                        {h.sstTemp.toFixed(1)}°F
-                      </span>
-                      {hasLiveSST && (
-                        <span className="ml-1 text-[9px] text-cyan-400 font-medium uppercase tracking-wide">
-                          live
-                        </span>
-                      )}
-                    </>
-                  )}
+                  <ThermometerSun className="w-4 h-4 text-orange-400" />
+                  <span className="text-orange-400 font-semibold">{h.sstTemp.toFixed(1)}°F</span>
                 </div>
-                {!isLoading && (
-                  <div className="flex items-center gap-1 text-amber-400">
-                    <Flame className="w-4 h-4" />
-                    {h.breakDelta > 0 ? `+${h.breakDelta.toFixed(1)}°F break` : "no break detected"}
-                  </div>
-                )}
+                <div className="flex items-center gap-1 text-amber-400">
+                  <Flame className="w-4 h-4" />
+                  {h.breakDelta > 0 ? `+${h.breakDelta.toFixed(1)}°F break` : "no break"}
+                </div>
               </div>
 
-              {!isLoading && h.signals && (
-                <div className="space-y-0.5 mt-1">
+              {h.signals && (
+                <div className="space-y-0.5 mt-1 border-t border-slate-700/50 pt-1.5">
                   {[
                     { label: "SST", val: h.signals.sstScore || 0, max: 20, color: "#fb923c" },
                     { label: "Break", val: h.signals.sstBreakScore || 0, max: 35, color: "#fbbf24" },
@@ -414,45 +376,22 @@ export default function Hotspots() {
                   ].map((r) => (
                     <div key={r.label} className="flex items-center gap-1.5">
                       <span className="text-[9px] text-slate-500 w-10 shrink-0">{r.label}</span>
-                      <div className="flex-1 bg-slate-700 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{
-                            width: `${Math.round((r.val / r.max) * 100)}%`,
-                            background: r.color,
-                          }}
-                        />
+                      <div className="flex-1 bg-slate-700 rounded-full h-1 overflow-hidden">
+                        <div className="h-full rounded-full transition-all" style={{ width: `${Math.round((r.val / r.max) * 100)}%`, background: r.color }} />
                       </div>
-                      <span className="text-[9px] shrink-0" style={{ color: r.color }}>
-                        {r.val}/{r.max}
-                      </span>
+                      <span className="text-[9px] shrink-0 font-mono" style={{ color: r.color }}>{r.val}/{r.max}</span>
                     </div>
                   ))}
                 </div>
               )}
 
-              {!isLoading && (
-                <div className="text-xs text-purple-400 flex items-center gap-1">
+              <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-700/30">
+                <div className="text-purple-400 flex items-center gap-1">
                   <Navigation className="w-3 h-3" />
-                  LORAN W {td.w} / X {td.x} μs
+                  TD: W {td.w} / X {td.x}
                 </div>
-              )}
-
-              {!isLoading && h.species && h.species.length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {h.species.map((s) => (
-                    <span key={s} className="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full">
-                      {s}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {!isLoading && (
-                <div className="text-[10px] text-slate-600 mt-0.5">
-                  {def ? `${def.idealSstF || 72}°F ideal · ${def.historyPrior || 0}/10 history score` : ""}
-                </div>
-              )}
+                <div className="text-slate-500 font-mono">{def ? `${def.idealSstF || 72}° ideal` : ""}</div>
+              </div>
             </div>
           );
         })}
