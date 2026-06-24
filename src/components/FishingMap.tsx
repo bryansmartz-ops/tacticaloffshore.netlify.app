@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Non-Blocking Asynchronous Mapping Deck - Mode Isolation Edition
+// High-Fidelity Non-Blocking Asynchronous Mapping Deck - GPS Integrated Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -31,7 +31,7 @@ export interface FishingMapProps {
   sstOffset?: number;
   showBathy?: boolean;
   showWeather?: boolean; 
-  isPlotterArmed?: boolean; // Toggling state definition passed from Parent view container
+  isPlotterArmed?: boolean;
   flyTo?: { lat: number; lng: number; zoom?: number };
   className?: string;
 }
@@ -93,6 +93,7 @@ export default function FishingMap({
   
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
+  const userLocationMarkerRef = useRef<L.Marker | null>(null);
 
   const navAnchorRef = useRef<L.LatLng | null>(null);
   const navAnchorMarkerRef = useRef<L.Marker | null>(null);
@@ -263,7 +264,6 @@ export default function FishingMap({
 
     map.off("click");
 
-    // Clear active map plotter layers instantly if the master flag is deactivated
     if (!isPlotterArmed) {
       if (navPolylineRef.current) map.removeLayer(navPolylineRef.current);
       if (navAnchorMarkerRef.current) map.removeLayer(navAnchorMarkerRef.current);
@@ -289,7 +289,6 @@ export default function FishingMap({
 
       let plotterHtmlLine = "";
 
-      // Only execute the range-finding math if the compass arm toggle button is active
       if (isPlotterArmed) {
         if (navPolylineRef.current && !navAnchorRef.current) {
           map.removeLayer(navPolylineRef.current);
@@ -378,6 +377,24 @@ export default function FishingMap({
     return () => { map.off("click"); };
   }, [baselineSst, sstOffset, buoyData, isPlotterArmed]);
 
+  // ── ATOMIC HOOK: WATCH FLYTO TRIGGER CHANGES FOR RE-CENTERING ───────────
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && flyTo) {
+      // Drop a temporary boat icon if centering user coordinates directly
+      if (flyTo.lat !== 38.1 && flyTo.zoom === 11) {
+        if (userLocationMarkerRef.current) map.removeLayer(userLocationMarkerRef.current);
+        userLocationMarkerRef.current = L.marker([flyTo.lat, flyTo.lng], {
+          icon: L.divIcon({
+            className: "",
+            html: `<div style="width:14px; height:14px; background:#ef4444; border:2px solid #fff; border-radius:50%; box-shadow:0 0 8px rgba(0,0,0,0.5);"></div>`
+          })
+        }).addTo(map);
+      }
+      map.flyTo([flyTo.lat, flyTo.lng], flyTo.zoom || 9, { animate: true, duration: 1.2 });
+    }
+  }, [flyTo]);
+
   // ── LAYER HOOK E: ATOMIC VISIBILITY SYNC CONTROLS ───────────────────────
   useEffect(() => {
     const map = mapRef.current;
@@ -437,13 +454,6 @@ export default function FishingMap({
       labelMarkersRef.current.set(h.id, label);
     });
   }, [liveHotspots, showHotspots, sstOffset]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (map && flyTo) {
-      map.flyTo([flyTo.lat, flyTo.lng], flyTo.zoom || 9, { animate: true, duration: 1.5 });
-    }
-  }, [flyTo]);
 
   return <div ref={containerRef} className={`w-full h-full ${className}`} />;
 }
