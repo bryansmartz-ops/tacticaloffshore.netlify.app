@@ -1,3 +1,7 @@
+// netlify/functions/get-latest-briefs.ts
+// Blended Multi-Sensor Geo-Polar SST Proxy Engine
+// ──────────────────────────────────────────────────────────────────────────────────────
+
 import { Handler } from "@netlify/functions";
 import { createClient } from "@supabase/supabase-js";
 
@@ -44,17 +48,17 @@ export const handler: Handler = async (event, context) => {
     return { statusCode: 200, headers: securityHeaders, body: "" };
   }
 
-  // ── ROUTE SPECIFIC INTERCEPTOR: SERVE NATIVE ACCELERATED SST PNG BLOB ──
+  // ── ROUTE INTERCEPTOR: HIGH-AVAILABILITY BLENDED GEO-POLAR SST RASTER ──
   if (event.queryStringParameters?.fetchSstLayer === "true") {
     try {
-      // Dynamic temporal mapping to always query the most immediate satellite pass layout available
-      const currentIsoDate = new Date().toISOString().split("T")[0];
-      const fallbackUrl = `https://www.ncei.noaa.gov/erddap/wms/erdBAssta5day/request?service=WMS&version=1.3.0&request=GetMap&layers=erdBAssta5day:sst&styles=boxfill/KT_sst&crs=EPSG:4326&bbox=37.0,-75.5,39.5,-73.0&width=800&height=800&format=image/png&transparent=true&time=${currentIsoDate}T12:00:00Z`;
+      // Switches the target endpoint to NOAA STAR's operational blended analysis node
+      // Automatically combines microwave (cloud-blind) and GOES geostationary inputs
+      const blendedTargetUrl = `https://coastwatch.noaa.gov/erddap/wms/noaa_nesdis_blendSST/request?service=WMS&version=1.3.0&request=GetMap&layers=noaa_nesdis_blendSST:analysed_sst&styles=boxfill/KT_sst&crs=EPSG:4326&bbox=37.0,-75.5,39.5,-73.0&width=800&height=800&format=image/png&transparent=true&time=last`;
 
-      const response = await fetch(fallbackUrl, { headers: { "User-Agent": securityHeaders["User-Agent"] } });
+      const response = await fetch(blendedTargetUrl, { headers: { "User-Agent": securityHeaders["User-Agent"] } });
       
       if (!response.ok) {
-        throw new Error(`NOAA Raster extraction failed with status code ${response.status}`);
+        throw new Error(`NOAA Blended pipeline dropped connection: ${response.status}`);
       }
 
       const buffer = await response.arrayBuffer();
@@ -63,18 +67,18 @@ export const handler: Handler = async (event, context) => {
         headers: {
           ...securityHeaders,
           "Content-Type": "image/png",
-          "Cache-Control": "public, max-age=1800" // Cache visual tiles for 30 minutes to reduce loading times
+          "Cache-Control": "public, max-age=3600" // Cache layer cloud-side for 1 hour to maximize offshore loading speeds
         },
         body: Buffer.from(buffer).toString("base64"),
         isBase64Encoded: true
       };
     } catch (layerErr: any) {
-      console.error("[SST Proxy Crash]:", layerErr);
-      return { statusCode: 500, headers: securityHeaders, body: "Raster channel mapping failure." };
+      console.error("[Blended SST Proxy Crash]:", layerErr);
+      return { statusCode: 500, headers: securityHeaders, body: "Blended data layer stream failure." };
     }
   }
 
-  // ── CORE DATA ENGINE CONTINUATION LAYER ─────────────────────────────────
+  // ── CORE SYSTEMS CONTINUATION LAYER ─────────────────────────────────────
   try {
     let buoyMetrics = {
       stationId: "Offline",
@@ -170,6 +174,7 @@ export const handler: Handler = async (event, context) => {
       console.warn("Spatial models offline.");
     }
 
+    // Capture the active blended temperature values from your leading sensor arrays
     const currentWaterTemp = buoyMetrics.waterTempF || 72.4;
     const computedHotspots = CANYON_HOTSPOTS.map((spot) => {
       let tempDelta = 0;
