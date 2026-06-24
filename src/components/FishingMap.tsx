@@ -52,16 +52,16 @@ const BATHY_OVERLAY_TILE = "https://server.arcgisonline.com/ArcGIS/rest/services
 const WEATHER_WAVE_TILE = "https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png"; 
 
 const TELEMETRY_PROXY = "/.netlify/functions/get-latest-briefs";
-const OC_INLET = { lat: 38.3289, lng: -75.0913 }; // OC Sea Buoy Reference Anchor
+const OC_INLET = { lat: 38.3289, lng: -75.0913 }; 
 
-// Function to calculate Magnetic Bearing (incorporating standard Mid-Atlantic variation ~11.5W)
+// Calculates Magnetic Bearing incorporating standard Mid-Atlantic variation (~11.5W)
 function calculateBearingMagnetic(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
   const y = Math.sin(dLng) * Math.cos((lat2 * Math.PI) / 180);
   const x = Math.cos((lat1 * Math.PI) / 180) * Math.sin((lat2 * Math.PI) / 180) - Math.sin((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.cos(dLng);
   let trueBearing = (Math.atan2(y, x) * 180) / Math.PI;
   trueBearing = (trueBearing + 360) % 360;
-  return Math.round((trueBearing + 11.5) % 360); // Adds 11.5 degrees for Western Variation
+  return Math.round((trueBearing + 11.5) % 360); 
 }
 
 export default function FishingMap({
@@ -93,7 +93,7 @@ export default function FishingMap({
   const circleMarkersRef = useRef<Map<string, L.CircleMarker>>(new Map());
   const labelMarkersRef = useRef<Map<string, L.Marker>>(new Map());
 
-  // Refs to manage the captain's live leg plotter tools across renders
+  // Navigation references to clear layers internally
   const navAnchorRef = useRef<L.LatLng | null>(null);
   const navAnchorMarkerRef = useRef<L.Marker | null>(null);
   const navPolylineRef = useRef<L.Polyline | null>(null);
@@ -124,7 +124,7 @@ export default function FishingMap({
     return "rgba(37, 99, 235, 0.45)";                      
   };
 
-  // ── LAYER HOOK A: INITIALIZE MAP INSTANCE ───────────────────────────────
+  // ── LAYER HOOK A: INITIALIZE MAP CANVAS INSTANCE EXACTLY ONCE ───────────
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
 
@@ -152,7 +152,7 @@ export default function FishingMap({
     return () => { map.remove(); mapRef.current = null; };
   }, []);
 
-  // ── LAYER HOOK B: SYSTEM WORKER INITIALIZATION ──────────────────────────
+  // ── LAYER HOOK B: STANDALONE INTEL SYSTEM WORKER INITIALIZATION ──────────
   useEffect(() => {
     workerRef.current = new Worker(
       new URL("/src/workers/hotspotEvaluator.worker.ts", import.meta.url),
@@ -175,7 +175,7 @@ export default function FishingMap({
     };
   }, [onHotspotsResolved]);
 
-  // ── LAYER HOOK C: TELEMETRY FETCH PIPELINE ──────────────────────────────
+  // ── LAYER HOOK C: TELEMETRY STREAM PARSING ──────────────────────────────
   useEffect(() => {
     let activeScope = true;
     async function loadCloudTelemetry() {
@@ -256,7 +256,7 @@ export default function FishingMap({
     }
   }, [baselineSst, sstOffset, showSST]);
 
-  // ── LAYER HOOK D: DYNAMIC LEG PLOTTER AND CODES INTERCEPTOR ───────────────
+  // ── LAYER HOOK D: AUTOMATIC SELF-CLEARING LEG PLOTTER & TELEMETRY ────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -278,38 +278,39 @@ export default function FishingMap({
       const rangeToOcInlet = haversineNm(OC_INLET.lat, OC_INLET.lng, clickLat, clickLng);
       const loran = toLoranTD(clickLat, clickLng);
 
-      // ── LIVE POINT-TO-POINT CAPTAIN'S PLOTTER LOGIC ──────────────────────
       let plotterHtmlLine = "";
 
+      if (navPolylineRef.current && !navAnchorRef.current) {
+        map.removeLayer(navPolylineRef.current);
+        if (navAnchorMarkerRef.current) map.removeLayer(navAnchorMarkerRef.current);
+        navPolylineRef.current = null;
+        navAnchorMarkerRef.current = null;
+      }
+
       if (!navAnchorRef.current) {
-        // Step 1: First click sets the custom navigation origin waypoint
         navAnchorRef.current = e.latlng;
         
         navAnchorMarkerRef.current = L.marker(e.latlng, {
           icon: L.divIcon({
             className: "",
-            html: `<div style="display:flex; items-center; justify-content:center; width:20px; height:20px; background:rgba(34,211,238,0.2); border:2px solid #22d3ee; border-radius:50%;"><span style="width:4px; height:4px; background:#22d3ee; border-radius:50%; margin:auto;"></span></div>`,
+            html: `<div style="display:flex; align-items:center; justify-content:center; width:20px; height:20px; background:rgba(34,211,238,0.2); border:2px solid #22d3ee; border-radius:50%;"><span style="width:4px; height:4px; background:#22d3ee; border-radius:50%; margin:auto;"></span></div>`,
             iconSize: [20, 20], iconAnchor: [10, 10]
           })
         }).addTo(map);
 
         plotterHtmlLine = `
           <div style="margin-top:5px; padding:4px 6px; background:rgba(34,211,238,0.1); border:1px solid rgba(34,211,238,0.3); border-radius:6px; color:#22d3ee; text-align:center; font-weight:bold; font-size:10px;">
-            📍 NAV ORIGIN DROPPED<br/>Tap next mark to calculate heading/range.
+            📍 NAV ORIGIN ANCHORED<br/>Tap next location to plot range/heading.
           </div>`;
       } else {
-        // Step 2: Second click draws the line and computes precise navigation vectors
         const start = navAnchorRef.current;
         const currentLegNm = haversineNm(start.lat, start.lng, clickLat, clickLng);
         const magneticBearing = calculateBearingMagnetic(start.lat, start.lng, clickLat, clickLng);
 
-        if (navPolylineRef.current) map.removeLayer(navPolylineRef.current);
-        
         navPolylineRef.current = L.polyline([start, e.latlng], {
           color: "#22d3ee", weight: 3, dashArray: "5, 8", pane: "hotspotPane"
         }).addTo(map);
 
-        // Scan canonical list to find the closest canyon or rim structure to our destination tap
         let destinationStructureText = "Open Ocean Grid";
         let minCanyonDist = 9999;
         CANYONS.forEach((c) => {
@@ -321,15 +322,14 @@ export default function FishingMap({
         });
 
         plotterHtmlLine = `
-          <div style="margin-top:6px; padding:5px; background:rgba(34,211,238,0.15); border:1px solid #22d3ee; border-radius:6px; font-family:monospace;">
+          <div style="margin-top:6px; padding:5px; background:rgba(15,23,42,0.85); border:1px solid #22d3ee; border-radius:6px; font-family:monospace;">
             <b style="color:#22d3ee; display:block; border-bottom:1px solid rgba(34,211,238,0.3); margin-bottom:3px; font-size:11px;">📐 PLOTTED LEG ROUTE</b>
             To: <span style="color:#fff;">${destinationStructureText}</span><br/>
             Range: <span style="color:#fff; font-weight:bold;">${currentLegNm.toFixed(1)} NM</span><br/>
             Heading: <span style="color:#34d399; font-weight:bold;">${magneticBearing.toString().padStart(3, "0")}°M</span>
-            <button id="clr-nav-line" style="width:100%; margin-top:5px; background:#ff4d4d; border:none; color:white; font-size:8px; padding:2px; font-weight:bold; border-radius:3px; cursor:pointer;">CLEAR LEG PLOTTER</button>
+            <div style="font-size:8px; color:#94a3b8; text-align:center; margin-top:5px; font-style:italic;">Tap anywhere else to reset and start a new leg.</div>
           </div>`;
           
-        // Reset the tracking coordinates reference for successive runs
         navAnchorRef.current = null;
       }
 
@@ -340,7 +340,7 @@ export default function FishingMap({
       const telemetrySource = buoyData ? buoyData.source : "OFFSHORE HARMONIC CONSOLE";
       const badgeColor = telemetrySource.includes("NOAA") ? "#22c55e" : "#64748b";
 
-      const popup = L.popup()
+      L.popup()
         .setLatLng(e.latlng)
         .setContent(`
           <div style="color:#cbd5e1;font-size:11px;min-width:215px;font-family:monospace;line-height:1.5;">
@@ -362,20 +362,6 @@ export default function FishingMap({
           </div>
         `)
         .openOn(map);
-
-      // Event listener handling cleanup actions inside the popup element
-      popup.on("add", () => {
-        const clrBtn = document.getElementById("clr-nav-line");
-        if (clrBtn) {
-          clrBtn.onclick = (event) => {
-            event.stopPropagation();
-            if (navPolylineRef.current) map.removeLayer(navPolylineRef.current);
-            if (navAnchorMarkerRef.current) map.removeLayer(navAnchorMarkerRef.current);
-            navAnchorRef.current = null;
-            map.closePopup();
-          };
-        }
-      });
     });
 
     return () => { map.off("click"); };
