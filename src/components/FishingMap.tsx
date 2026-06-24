@@ -1,5 +1,5 @@
 // src/components/FishingMap.tsx
-// High-Fidelity Non-Blocking Asynchronous Mapping Deck - High-Contrast Synchronized Edition
+// High-Fidelity Non-Blocking Asynchronous Mapping Deck - True Spatial Grid Matrix Edition
 // ──────────────────────────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef, useState } from "react";
@@ -99,16 +99,17 @@ export default function FishingMap({
   const navAnchorMarkerRef = useRef<L.Marker | null>(null);
   const navPolylineRef = useRef<L.Polyline | null>(null);
 
-  // Locked Hex Key scale rules matching your layout legend explicitly
+  // Absolute master hex color conversion map tied firmly to set temperature boundaries
   const getDynamicHexColorFromTemp = (tempF: number): string => {
-    if (tempF >= 81.0) return "rgba(185, 28, 28, 0.65)";   
-    if (tempF >= 77.0) return "rgba(220, 38, 38, 0.58)";   
-    if (tempF >= 73.0) return "rgba(234, 88, 12, 0.52)";   
-    if (tempF >= 69.0) return "rgba(250, 204, 21, 0.48)";  
-    if (tempF >= 64.0) return "rgba(22, 163, 74, 0.45)";   
-    return "rgba(37, 99, 235, 0.45)";                      
+    if (tempF >= 81.0) return "rgba(185, 28, 28, 0.65)";   // Crimson Hot (Gulf Stream Core)
+    if (tempF >= 77.0) return "rgba(220, 38, 38, 0.58)";   // Deep Red
+    if (tempF >= 73.0) return "rgba(234, 88, 12, 0.52)";   // Orange (Main Temperature Breaks)
+    if (tempF >= 69.0) return "rgba(250, 204, 21, 0.48)";  // Yellow/Orange Transition
+    if (tempF >= 64.0) return "rgba(22, 163, 74, 0.45)";   // Green (Cool Inshore Shelf)
+    return "rgba(37, 99, 235, 0.45)";                      // Blue (Cold Bottom Water)
   };
 
+  // Structural simulation algorithm used strictly for empty grid cells with no nearby data markers
   const getInterpolatedSstAtNode = (lat: number, lng: number, baseTemp: number, offset: number): number => {
     let baseCoastLng = -75.5;
     if (lat < 35.2) {
@@ -218,7 +219,7 @@ export default function FishingMap({
     }
   }, [baselineSst, sstOffset, hotspotDefs]);
 
-  // ── RE-ENGINEERED CANVAS BACKGROUND GRADIENT GENERATOR ───────────────────
+  // ── HIGH-FIDELITY SPATIAL PIXEL MATRIX THERMAL GENERATOR ─────────────────
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -227,36 +228,80 @@ export default function FishingMap({
 
     const sstVisualBounds: L.LatLngBoundsExpression = [[34.5, -76.5], [41.0, -70.0]];
     const offscreenCanvas = document.createElement("canvas");
-    offscreenCanvas.width = 600;
-    offscreenCanvas.height = 600;
+    
+    // Configures a dense rendering matrix scaled smoothly via browser engines
+    const gridCols = 32;
+    const gridRows = 32;
+    offscreenCanvas.width = gridCols;
+    offscreenCanvas.height = gridRows;
+    
     const ctx = offscreenCanvas.getContext("2d");
     
     if (ctx) {
-      ctx.clearRect(0, 0, 600, 600);
-      const latToY = (lat: number) => (1.0 - (lat - 34.5) / (41.0 - 34.5)) * 600;
-      const lngToX = (lng: number) => ((lng - (-76.5)) / (-70.0 - (-76.5))) * 600;
+      ctx.clearRect(0, 0, gridCols, gridRows);
 
-      ctx.beginPath();
-      ctx.moveTo(lngToX(-75.51), latToY(35.22)); ctx.lineTo(lngToX(-75.95), latToY(36.85)); 
-      ctx.lineTo(lngToX(-75.05), latToY(38.35)); ctx.lineTo(lngToX(-74.25), latToY(39.50)); 
-      ctx.lineTo(lngToX(-73.95), latToY(40.50)); ctx.lineTo(lngToX(-70.00), latToY(41.00)); 
-      ctx.lineTo(lngToX(-70.00), latToY(34.50)); ctx.closePath(); ctx.clip();
+      const minLat = 34.5, maxLat = 41.0;
+      const minLng = -76.5, maxLng = -70.0;
 
-      const tempInshoreCool   = getInterpolatedSstAtNode(38.0, -75.5, baselineSst, sstOffset);
-      const tempMidShelfBreak = getInterpolatedSstAtNode(38.0, -73.5, baselineSst, sstOffset);
-      const tempOffshoreGulf  = getInterpolatedSstAtNode(38.0, -70.5, baselineSst, sstOffset);
+      // Scan and evaluate the chart grid block-by-block
+      for (let r = 0; r < gridRows; r++) {
+        const pctY = r / (gridRows - 1);
+        const currentLat = maxLat - (pctY * (maxLat - minLat));
 
-      const linearGradient = ctx.createLinearGradient(lngToX(-75.50), latToY(38.00), lngToX(-70.50), latToY(38.00));
-      linearGradient.addColorStop(0, getDynamicHexColorFromTemp(tempInshoreCool));   
-      linearGradient.addColorStop(0.40, getDynamicHexColorFromTemp(tempMidShelfBreak)); 
-      linearGradient.addColorStop(1, getDynamicHexColorFromTemp(tempOffshoreGulf));   
+        for (let c = 0; c < gridCols; c++) {
+          const pctX = c / (gridCols - 1);
+          const currentLng = minLng + (pctX * (maxLng - minLng));
+
+          let cellTemp = baselineSst + sstOffset;
+          let totalWeight = 0;
+          let weightedTempSum = 0;
+
+          // Perform Inverse Distance Weighting to accurately blend physical entries
+          if (liveHotspots && liveHotspots.length > 0) {
+            for (let i = 0; i < liveHotspots.length; i++) {
+              const spot = liveHotspots[i];
+              const distance = haversineNm(spot.lat, spot.lng, currentLat, currentLng);
+              
+              if (distance < 1.5) {
+                cellTemp = spot.sstTemp;
+                totalWeight = -1;
+                break;
+              }
+              if (distance > 0) {
+                const weight = 1 / Math.pow(distance, 2);
+                totalWeight += weight;
+                weightedTempSum += spot.sstTemp * weight;
+              }
+            }
+            if (totalWeight > 0 && totalWeight !== -1) {
+              cellTemp = weightedTempSum / totalWeight;
+            }
+          } else {
+            cellTemp = getInterpolatedSstAtNode(currentLat, currentLng, baselineSst, sstOffset);
+          }
+
+          ctx.fillStyle = getDynamicHexColorFromTemp(cellTemp);
+          ctx.fillRect(c, r, 1, 1);
+        }
+      }
       
-      ctx.fillStyle = linearGradient; ctx.fillRect(0, 0, 600, 600); ctx.filter = "blur(8px)";
       const thermalImageString = offscreenCanvas.toDataURL();
-      sstStaticOverlayRef.current = L.imageOverlay(thermalImageString, sstVisualBounds, { pane: "sstPane", interactive: false });
-      if (showSST) sstStaticOverlayRef.current.addTo(map);
+      sstStaticOverlayRef.current = L.imageOverlay(thermalImageString, sstVisualBounds, { 
+        pane: "sstPane", 
+        interactive: false,
+        opacity: 0.60 
+      });
+
+      if (showSST) {
+        sstStaticOverlayRef.current.addTo(map);
+        const layerElement = sstStaticOverlayRef.current.getElement();
+        if (layerElement) {
+          layerElement.style.imageRendering = "auto";
+          layerElement.style.filter = "blur(4px)"; 
+        }
+      }
     }
-  }, [baselineSst, sstOffset, showSST]);
+  }, [baselineSst, sstOffset, showSST, liveHotspots]);
 
   // ── LAYER HOOK D: 100% DATA-DRIVEN MAP CLICK TELEMETRY ROUTER ────────────
   useEffect(() => {
@@ -298,6 +343,8 @@ export default function FishingMap({
         if (totalWeight > 0 && totalWeight !== -1) {
           computedClickTemp = weightedTempSum / totalWeight;
         }
+      } else {
+        computedClickTemp = getInterpolatedSstAtNode(clickLat, clickLng, baselineSst, sstOffset);
       }
 
       const rangeToOcInlet = haversineNm(OC_INLET.lat, OC_INLET.lng, clickLat, clickLng);
@@ -462,6 +509,7 @@ export default function FishingMap({
     liveHotspots.forEach((h) => {
       const color = confidenceColor(h.confidence);
       const circle = L.circleMarker([h.lat, h.lng], { pane: "hotspotPane", radius: 12, color, fillColor: color, fillOpacity: 0.4, weight: 2 });
+      
       circle.bindPopup(`
         <div style="color:#cbd5e1;font-size:12px;min-width:200px;font-family:monospace;">
           <b style="color:${color}; font-size:13px; display:block; margin-bottom:2px;">${h.title}</b>
