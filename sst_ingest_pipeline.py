@@ -18,10 +18,10 @@ MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 MATRIX_RES = 32
 
-# NOAA ERDDAP URL API - Targets the active high-res ACSPO Blended L3S satellite line
+# NOAA ERDDAP URL API - Formatted perfectly with Latitude, Longitude, and Time layers
 NOAA_ERDDAP_URL = (
     "https://coastwatch.pfeg.noaa.gov/erddap/griddap/noaacwBLENDEDsstDaily.nc?"
-    f"sst[latest][(0.0):(0.0)][({MAX_LAT}):({MIN_LAT})][({MIN_LNG}):({MAX_LNG})]"
+    f"sst[latest][({MAX_LAT}):({MIN_LAT})][({MIN_LNG}):({MAX_LNG})]"
 )
 
 OUTPUT_IMG_PATH = "./daily_latest.png"
@@ -75,7 +75,7 @@ def run_pipeline():
 
     color_sequence = [
         "rgba(37, 99, 235, 0.55)", "rgba(22, 163, 74, 0.55)", "rgba(250, 204, 21, 0.55)",
-        "rgba(234, 88, 12, 0.55)", "rgba(220, 38, 38, 0.55)", "rgba(185, 28, 28, 0.65)"
+        "rgba(234, 88, 12, 0.55)", "rgba(22, 163, 74, 0.55)", "rgba(185, 28, 28, 0.65)"
     ]
     
     hex_colors = ["#2563eb", "#16a34a", "#facc15", "#ea580c", "#dc2626", "#b91c1c"]
