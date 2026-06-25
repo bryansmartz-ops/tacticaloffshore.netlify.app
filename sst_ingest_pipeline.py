@@ -18,8 +18,9 @@ MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 
 # 2. COMPUTE DYNAMIC UTC DATA WINDOW TARGETS
-# Generates a clean ISO-8601 string structure to clear the WAF 403 block natively
-target_date = (datetime.datetime.utcnow() - datetime.timedelta(days=1)).strftime("%Y-%m-%dT09:00:00Z")
+# NASA JPL MUR tracks days strictly from midnight UTC (00:00:00Z). 
+# We request yesterday's file to ensure the full daily pass has processed and compiled.
+target_date = (datetime.datetime.utcnow() - datetime.timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
 
 NOAA_MUR_URL = (
     "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst"
