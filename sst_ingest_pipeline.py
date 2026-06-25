@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-SST Ingestion Pipeline - Real-World Production High-Fidelity Satellite Engine
-Extracts 1km resolution telemetry grids directly from NOAA/NASA JPL MUR SST records.
+SST Ingestion Pipeline - North Atlantic Regional Satellite Engine
+Extracts high-resolution regional telemetry grids directly from NOAA CoastWatch East Coast Nodes.
 """
 
 import os
@@ -17,9 +17,12 @@ from supabase import create_client, Client
 MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 
-# 2. TOURNAMENT GOLD STANDARD ENDPOINT: JPL MUR SST (1km Resolution Grid)
-# Formatted to query the unconstrained active grid layer cleanly to bypass server-side slicing errors
-NOAA_MUR_URL = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst[latest][:][:]"
+# 2. REGIONAL ENDPOINT: NOAA CoastWatch East Coast 3-Day Blended SST
+# Pre-filtered to the Atlantic region so it won't trigger server-side size limits
+NOAA_REGIONAL_URL = (
+    "https://coastwatch.node.noaa.gov/erddap/griddap/noaacwSSTAtlanticDaily.nc?sst"
+    f"[latest][({MAX_LAT}):({MIN_LAT})][({MIN_LNG}):({MAX_LNG})]"
+)
 
 OUTPUT_IMG_PATH = "./daily_latest.png"
 
@@ -28,53 +31,41 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def run_pipeline():
-    print("⏳ Stage 1: Establishing handshake with NOAA/NASA JPL Data Nodes...")
+    print("⏳ Stage 1: Connecting to NOAA CoastWatch East Coast Regional Data Node...")
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        # Fetching the raw NetCDF data file via HTTP stream
-        response = requests.get(NOAA_MUR_URL, headers=headers, stream=True, timeout=120)
+        response = requests.get(NOAA_REGIONAL_URL, headers=headers, stream=True, timeout=90)
         response.raise_for_status()
         
         tmp_nc = "tmp_satellite_grid.nc"
         with open(tmp_nc, "wb") as f:
             for chunk in response.iter_content(chunk_size=16384):
                 f.write(chunk)
-        print("✅ Stage 1 Complete: Binary NetCDF satellite package secured.")
+        print("✅ Stage 1 Complete: Regional NetCDF satellite package secured.")
     except Exception as e:
-        print(f"❌ Critical Error connecting to NOAA ERDDAP Stream: {e}")
+        print(f"❌ Critical Error connecting to NOAA Regional Stream: {e}")
         return
 
-    print("⏳ Stage 2: Slicing multidimensional structural dimensions locally...")
+    print("⏳ Stage 2: Extracting telemetry matrix dimensions...")
     try:
         with xr.open_dataset(tmp_nc) as ds:
-            # Dynamically look up the exact name of coordinate dimensions inside NASA's payload
-            lat_dim = 'latitude' if 'latitude' in ds.coords else 'lat'
-            lon_dim = 'longitude' if 'longitude' in ds.coords else 'lon'
-            
-            # Perform high-precision slicing right in our secure virtual machine memory environment
-            sliced_ds = ds.sel({
-                lat_dim: slice(MIN_LAT, MAX_LAT),
-                lon_dim: slice(MIN_LNG, MAX_LNG)
-            })
-            
             # Extract out the 2D spatial temperature matrix
-            sst_k = sliced_ds['analysed_sst'].values.squeeze()
+            sst_k = ds['sst'].values.squeeze()
             
-            # Real-World Conversion Math:
-            # NOAA stores MUR data in Kelvin. Convert to Fahrenheit: (K - 273.15) * 1.8 + 32
+            # Convert Kelvin to Fahrenheit natively: (K - 273.15) * 1.8 + 32
             sst_f = (sst_k - 273.15) * 1.8 + 32
             
         if os.path.exists(tmp_nc):
             os.remove(tmp_nc)
             
-        # Isolate true marine pixels, stripping out dry landmasses or cloud anomalies
+        # Isolate true marine pixels, stripping out dry landmasses or heavy cloud blocks
         valid_temps = sst_f[~np.isnan(sst_f)]
         if len(valid_temps) == 0:
-            raise ValueError("Satellite pass returned completely null/masked coordinate array blocks.")
+            raise ValueError("Satellite pass returned completely null/masked coordinate blocks.")
             
-        print("✅ Stage 2 Complete: Temperature metrics isolated and mapped natively.")
+        print("✅ Stage 2 Complete: Real-world temperature data mapped successfully.")
     except Exception as e:
         print(f"❌ Critical Error parsing data layers: {e}")
         if os.path.exists(tmp_nc):
@@ -89,7 +80,7 @@ def run_pipeline():
 
     # Establish high-contrast palette hex mappings
     color_sequence = [
-        "rgba(37, 99, 235, 0.55)",   # Blue (Cool Inshore/Shelf)
+        "rgba(37, 99, 235, 0.55)",   # Blue (Cool Inshore)
         "rgba(22, 163, 74, 0.55)",   # Green (The Green Monster Curve)
         "rgba(250, 204, 21, 0.55)",  # Yellow (Transition Water)
         "rgba(234, 88, 12, 0.55)",   # Orange (Warm Core Structure)
@@ -104,11 +95,7 @@ def run_pipeline():
     sst_f_normalized = (sst_f - min_range) / (max_range - min_range)
     sst_f_normalized = np.clip(sst_f_normalized, 0, 1)
     
-    # Flip the array along the vertical axis if NOAA's grid indexing sorts North-to-South
-    # This prevents the satellite chart from rendering upside down on Leaflet
-    sst_f_normalized = np.flipud(sst_f_normalized)
-    
-    nan_mask = np.isnan(sst_f_normalized)
+    nan_mask = np.isnan(sst_f)
     rgba_image_data = custom_cmap(sst_f_normalized)
     rgba_image_data[nan_mask] = [0, 0, 0, 0] # Alpha 0 handles landmasses and cloud fields
     
