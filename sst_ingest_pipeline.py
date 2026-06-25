@@ -18,8 +18,8 @@ MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 MATRIX_RES = 32
 
-# Master Regional Data Link - Broad grid to prevent 404 errors entirely
-NOAA_BULLETPROOF_URL = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/noaacwBLENDEDsstDaily.nc?sst[latest][(25.0):(50.0)][(-85.0):(-65.0)]"
+# Master Data Link - Targets a fully realized spatial projection block over the Mid-Atlantic
+NOAA_BULLETPROOF_URL = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/noaacwBLENDEDsstDaily.nc?sst[latest][][][]"
 
 OUTPUT_IMG_PATH = "./daily_latest.png"
 
@@ -30,11 +30,11 @@ SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 def run_pipeline():
     print("⏳ Stage 1: Downloading master North Atlantic data block from NOAA...")
     try:
-        # Declaring a browser signature to satisfy NOAA security policies and clear the 403 block
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(NOAA_BULLETPROOF_URL, headers=headers, stream=True, timeout=60)
+        # Passing empty dimension brackets [] [] [] instructs ERDDAP to return the full unconstrained structural layer
+        response = requests.get(NOAA_BULLETPROOF_URL, headers=headers, stream=True, timeout=90)
         response.raise_for_status()
         
         tmp_nc = "tmp_satellite_grid.nc"
@@ -49,9 +49,17 @@ def run_pipeline():
     print("⏳ Stage 2: Slicing Mid-Atlantic coordinate window locally...")
     try:
         with xr.open_dataset(tmp_nc) as ds:
-            # Slice out our exact canyon coordinate bounding box using native xarray logic
-            sliced_ds = ds.sel(latitude=slice(MAX_LAT, MIN_LAT), longitude=slice(MIN_LNG, MAX_LNG))
+            # Dynamically identify correct coordinate axis dimensions inside the NetCDF payload
+            lat_key = 'latitude' if 'latitude' in ds.coords else 'lat'
+            lng_key = 'longitude' if 'longitude' in ds.coords else 'lon'
             
+            # Extract and perform high-precision local matrix slicing within Python's runtime memory
+            # Handles both North-South and South-North array sorting profiles automatically
+            if ds[lat_key].values[0] > ds[lat_key].values[-1]:
+                sliced_ds = ds.sel({lat_key: slice(MAX_LAT, MIN_LAT), lng_key: slice(MIN_LNG, MAX_LNG)})
+            else:
+                sliced_ds = ds.sel({lat_key: slice(MIN_LAT, MAX_LAT), lng_key: slice(MIN_LNG, MAX_LNG)})
+                
             sst_k = sliced_ds['sst'].values.squeeze()
             # Convert Kelvin to Fahrenheit natively: (K - 273.15) * 9/5 + 32
             sst_f = (sst_k - 273.15) * 1.8 + 32
