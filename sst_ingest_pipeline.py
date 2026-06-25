@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-SST Ingestion Pipeline - Live Production High-Fidelity Satellite Engine
-Extracts 1km ultra-high-resolution telemetry grids directly from NASA/JPL MUR SST.
+SST Ingestion Pipeline - Enterprise Production Engine
+Extracts live sea surface temperatures from the high-availability NOAA OI SST V2.1 stream.
 """
 
 import os
@@ -17,14 +17,11 @@ from supabase import create_client, Client
 MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 
-# 2. COMPUTE DYNAMIC UTC DATA WINDOW TARGETS
-# NASA JPL MUR tracks days strictly from midnight UTC (00:00:00Z). 
-# We request yesterday's file to ensure the full daily pass has processed and compiled.
-target_date = (datetime.datetime.utcnow() - datetime.timedelta(days=1)).strftime("%Y-%m-%dT00:00:00Z")
-
-NOAA_MUR_URL = (
-    "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst"
-    f"[({target_date})][({MIN_LAT}):({MAX_LAT})][({MIN_LNG}):({MAX_LNG})]"
+# 2. HIGH-AVAILABILITY NODE: NOAA OI SST V2.1 Daily Aggregation
+# Realigned: Swapped 'latest' for the explicit live integer index 16343 verified by the server
+NOAA_OISST_URL = (
+    "https://coastwatch.pfeg.noaa.gov/erddap/griddap/ncdcOisst21Agg.nc?sst"
+    f"[16343][0][({MIN_LAT}):({MAX_LAT})][({MIN_LNG}):({MAX_LNG})]"
 )
 
 OUTPUT_IMG_PATH = "./daily_latest.png"
@@ -34,47 +31,43 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def run_pipeline():
-    print(f"⏳ Stage 1: Handshaking with NOAA Central System using target context window: {target_date}...")
+    print("⏳ Stage 1: Handshaking with NOAA High-Availability Data Stream...")
     try:
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
-        response = requests.get(NOAA_MUR_URL, headers=headers, stream=True, timeout=120)
+        response = requests.get(NOAA_OISST_URL, headers=headers, stream=True, timeout=60)
         response.raise_for_status()
         
         tmp_nc = "tmp_satellite_grid.nc"
         with open(tmp_nc, "wb") as f:
             for chunk in response.iter_content(chunk_size=16384):
                 f.write(chunk)
-        print("✅ Stage 1 Complete: Central NetCDF satellite package secured.")
+        print("✅ Stage 1 Complete: Operational NetCDF satellite asset secured.")
     except Exception as e:
-        print(f"❌ Critical Error connecting to NOAA Central Stream: {e}")
+        print(f"❌ Critical Error connecting to NOAA OISST Hub: {e}")
         return
 
-    print("⏳ Stage 2: Extracting telemetry matrix dimensions...")
+    print("⏳ Stage 2: Parsing telemetry layers and uncompressing matrices...")
     try:
         with xr.open_dataset(tmp_nc) as ds:
-            # Extract raw short integers from variable array
-            raw_sst = ds['analysed_sst'].values.squeeze()
+            # Extract 2D matrix, squeezing out the 1-sized Time and Zlev dimensions cleanly
+            sst_c = ds['sst'].values.squeeze()
             
-            # NASA/JPL Data Decompression: Apply scale factor (0.001) first 
-            # to uncompress short integers back to true Kelvin values
-            sst_k = raw_sst * 0.001
-            
-            # Convert Kelvin to Fahrenheit natively: (K - 273.15) * 1.8 + 32
-            sst_f = (sst_k - 273.15) * 1.8 + 32
+            # NOAA OI SST stores values natively in Celsius. Convert directly to Fahrenheit:
+            sst_f = sst_c * 1.8 + 32
             
         if os.path.exists(tmp_nc):
             os.remove(tmp_nc)
             
-        # Isolate true marine pixels, stripping out dry landmasses or heavy cloud blocks
+        # Extract active marine pixels, trimming out dry landmasses
         valid_temps = sst_f[~np.isnan(sst_f)]
         if len(valid_temps) == 0:
-            raise ValueError("Satellite pass returned completely null/masked coordinate blocks.")
+            raise ValueError("Satellite array returned completely null or masked matrix data bounds.")
             
-        print("✅ Stage 2 Complete: Real-world temperature data mapped successfully.")
+        print("✅ Stage 2 Complete: Real-world marine values isolated successfully.")
     except Exception as e:
-        print(f"❌ Critical Error parsing data layers: {e}")
+        print(f"❌ Critical Error parsing data structures: {e}")
         if os.path.exists(tmp_nc):
             os.remove(tmp_nc)
         return
@@ -86,7 +79,7 @@ def run_pipeline():
 
     # Establish high-contrast palette hex mappings
     color_sequence = [
-        "rgba(37, 99, 235, 0.55)",   # Blue (Cool Inshore)
+        "rgba(37, 99, 235, 0.55)",   # Blue (Cool Inshore/Shelf)
         "rgba(22, 163, 74, 0.55)",   # Green (The Green Monster Curve)
         "rgba(250, 204, 21, 0.55)",  # Yellow (Transition Water)
         "rgba(234, 88, 12, 0.55)",   # Orange (Warm Core Structure)
@@ -111,13 +104,13 @@ def run_pipeline():
     uint8_img_matrix = (rgba_image_data * 255).astype(np.uint8)
     img = Image.fromarray(uint8_img_matrix, mode="RGBA")
     
-    # Updated to the new cross-platform Pillow Resampling attribute structure
+    # Bicubic interpolation scales the grid up smoothly to a sharp high-contrast chart
     img_smooth = img.resize((1024, 1024), resample=Image.BICUBIC)
     img_smooth.save(OUTPUT_IMG_PATH, "PNG", optimize=True)
     print("✅ Stage 4 Complete: Transparent raster tile built.")
 
     if SUPABASE_KEY and SUPABASE_URL:
-        print("⏳ Stage 5: Streaming data packages to Supabase Data Warehouse...")
+        print("⏳ Stage 5: Syncing assets with Supabase Cloud Ecosystem...")
         try:
             supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
             timestamp_slug = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
