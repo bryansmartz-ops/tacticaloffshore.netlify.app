@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-SST Ingestion Pipeline - Bulletproof Fail-Safe Regional Grid Matrix Engine
-Downloads a fixed regional satellite block and slices coordinates locally.
+SST Ingestion Pipeline - Real-World Production High-Fidelity Satellite Engine
+Extracts 1km resolution telemetry grids directly from NOAA/NASA JPL MUR SST records.
 """
 
 import os
@@ -16,117 +16,120 @@ from supabase import create_client, Client
 # 1. GEOGRAPHIC BOUNDS (MID-ATLANTIC CANYON BOX)
 MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
-MATRIX_RES = 32
 
-# Master Data Link - Targets a fully realized spatial projection block over the Mid-Atlantic
-NOAA_BULLETPROOF_URL = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/noaacwBLENDEDsstDaily.nc?sst[latest][][][]"
+# 2. TOURNAMENT GOLD STANDARD ENDPOINT: JPL MUR SST (1km Resolution Grid)
+# Queries time array [latest], latitude slice, and longitude slice perfectly matching the grid orientation
+NOAA_MUR_URL = (
+    "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst"
+    f"[latest][({MIN_LAT}):({MAX_LAT})][({MIN_LNG}):({MAX_LNG})]"
+)
 
 OUTPUT_IMG_PATH = "./daily_latest.png"
 
-# Supabase cloud credentials pulled securely from environment settings
+# Supabase API keys loaded from secure environment context
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def run_pipeline():
-    print("⏳ Stage 1: Downloading master North Atlantic data block from NOAA...")
+    print("⏳ Stage 1: Establishing handshake with NOAA/NASA JPL Data Nodes...")
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        # Passing empty dimension brackets [] [] [] instructs ERDDAP to return the full unconstrained structural layer
-        response = requests.get(NOAA_BULLETPROOF_URL, headers=headers, stream=True, timeout=90)
+        # Fetching the raw NetCDF data file via HTTP stream
+        response = requests.get(NOAA_MUR_URL, headers=headers, stream=True, timeout=120)
         response.raise_for_status()
         
         tmp_nc = "tmp_satellite_grid.nc"
         with open(tmp_nc, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
+            for chunk in response.iter_content(chunk_size=16384):
                 f.write(chunk)
-        print("✅ Stage 1 Complete: Master regional satellite block secured.")
+        print("✅ Stage 1 Complete: Binary NetCDF satellite package secured.")
     except Exception as e:
-        print(f"❌ Failure downloading NOAA grid: {e}")
+        print(f"❌ Critical Error connecting to NOAA ERDDAP Stream: {e}")
         return
 
-    print("⏳ Stage 2: Slicing Mid-Atlantic coordinate window locally...")
+    print("⏳ Stage 2: Slicing multidimensional structural dimensions...")
     try:
         with xr.open_dataset(tmp_nc) as ds:
-            # Dynamically identify correct coordinate axis dimensions inside the NetCDF payload
-            lat_key = 'latitude' if 'latitude' in ds.coords else 'lat'
-            lng_key = 'longitude' if 'longitude' in ds.coords else 'lon'
+            # Extract out the 2D spatial temperature matrix
+            sst_k = ds['analysed_sst'].values.squeeze()
             
-            # Extract and perform high-precision local matrix slicing within Python's runtime memory
-            # Handles both North-South and South-North array sorting profiles automatically
-            if ds[lat_key].values[0] > ds[lat_key].values[-1]:
-                sliced_ds = ds.sel({lat_key: slice(MAX_LAT, MIN_LAT), lng_key: slice(MIN_LNG, MAX_LNG)})
-            else:
-                sliced_ds = ds.sel({lat_key: slice(MIN_LAT, MAX_LAT), lng_key: slice(MIN_LNG, MAX_LNG)})
-                
-            sst_k = sliced_ds['sst'].values.squeeze()
-            # Convert Kelvin to Fahrenheit natively: (K - 273.15) * 9/5 + 32
+            # Real-World Conversion Math:
+            # NOAA stores MUR data in Kelvin. Convert to Fahrenheit: (K - 273.15) * 1.8 + 32
             sst_f = (sst_k - 273.15) * 1.8 + 32
             
         if os.path.exists(tmp_nc):
             os.remove(tmp_nc)
             
-        # Isolate real marine temperatures by skipping over missing/cloud-masked values
+        # Isolate true marine pixels, stripping out dry landmasses or cloud anomalies
         valid_temps = sst_f[~np.isnan(sst_f)]
         if len(valid_temps) == 0:
-            print("⚠️ Warning: Heavy cloud cover detected. Triggering static matrix boundaries.")
-            valid_temps = np.array([65.0, 78.0])
+            raise ValueError("Satellite pass returned completely null/masked coordinate array blocks.")
             
-        print("✅ Stage 2 Complete: Mid-Atlantic coordinate window sliced safely.")
+        print("✅ Stage 2 Complete: Temperature metrics isolated and mapped natively.")
     except Exception as e:
-        print(f"❌ Failure parsing and slicing data matrices: {e}")
+        print(f"❌ Critical Error parsing data layers: {e}")
         if os.path.exists(tmp_nc):
             os.remove(tmp_nc)
         return
 
-    print("⏳ Stage 3: Computing dynamic palette scaling boundaries...")
+    print("⏳ Stage 3: Running Dynamic Contrast Scaling Math...")
+    # Clean up signal noise by trimming out the extreme top and bottom 2% of anomalous entries
     min_range = float(np.percentile(valid_temps, 2))
     max_range = float(np.percentile(valid_temps, 98))
-    print(f"📈 Observed Matrix Boundaries: {min_range:.1f}°F to {max_range:.1f}°F")
+    print(f"📈 Real-World Thermal Box Range: {min_range:.1f}°F to {max_range:.1f}°F")
 
+    # Establish high-contrast palette hex mappings
     color_sequence = [
-        "rgba(37, 99, 235, 0.55)", "rgba(22, 163, 74, 0.55)", "rgba(250, 204, 21, 0.55)",
-        "rgba(234, 88, 12, 0.55)", "rgba(220, 38, 38, 0.55)", "rgba(185, 28, 28, 0.65)"
+        "rgba(37, 99, 235, 0.55)",   # Blue (Cool Inshore/Shelf)
+        "rgba(22, 163, 74, 0.55)",   # Green (The Green Monster Curve)
+        "rgba(250, 204, 21, 0.55)",  # Yellow (Transition Water)
+        "rgba(234, 88, 12, 0.55)",   # Orange (Warm Core Structure)
+        "rgba(220, 38, 38, 0.55)",   # Deep Red (Marlin Water)
+        "rgba(185, 28, 28, 0.65)"    # Crimson (Core Gulf Stream Mainline)
     ]
-    
     hex_colors = ["#2563eb", "#16a34a", "#facc15", "#ea580c", "#dc2626", "#b91c1c"]
     custom_cmap = LinearSegmentedColormap.from_list("sst_scale", hex_colors, N=256)
-    print("✅ Stage 3 Complete: Dynamic color keys locked.")
 
-    print("⏳ Stage 4: Rasterizing high-fidelity transparent map overlay...")
+    print("⏳ Stage 4: Compiling transparent raster overlay...")
+    # Normalize values between 0.0 and 1.0 based on today's true active span
     sst_f_normalized = (sst_f - min_range) / (max_range - min_range)
     sst_f_normalized = np.clip(sst_f_normalized, 0, 1)
     
-    nan_mask = np.isnan(sst_f)
+    # Flip the array along the vertical axis if NOAA's grid indexing sorts North-to-South
+    # This prevents the satellite chart from rendering upside down on Leaflet
+    sst_f_normalized = np.flipud(sst_f_normalized)
+    
+    nan_mask = np.isnan(sst_f_normalized)
     rgba_image_data = custom_cmap(sst_f_normalized)
-    rgba_image_data[nan_mask] = [0, 0, 0, 0]
+    rgba_image_data[nan_mask] = [0, 0, 0, 0] # Alpha 0 handles landmasses and cloud fields
     
     uint8_img_matrix = (rgba_image_data * 255).astype(np.uint8)
     img = Image.fromarray(uint8_img_matrix, mode="RGBA")
     
-    img_smooth = img.resize((512, 512), resample=Image.Resample.BICUBIC)
+    # Resize up cleanly using high-grade bicubic filtering for ultra-smooth rendering
+    img_smooth = img.resize((1024, 1024), resample=Image.Resample.BICUBIC)
     img_smooth.save(OUTPUT_IMG_PATH, "PNG", optimize=True)
-    print("✅ Stage 4 Complete: High-contrast raster file built locally.")
+    print("✅ Stage 4 Complete: Transparent raster tile built.")
 
-    # Execute automated Supabase storage and data synchronization loops
     if SUPABASE_KEY and SUPABASE_URL:
-        print("⏳ Stage 5: Uploading assets directly to Supabase Cloud...")
+        print("⏳ Stage 5: Streaming data packages to Supabase Data Warehouse...")
         try:
             supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
             timestamp_slug = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             storage_destination = f"daily_layers/sst_{timestamp_slug}.png"
 
-            # 1. Ship physical transparent image file overlay to Storage Bucket
+            # 1. Ship image straight to public storage
             with open(OUTPUT_IMG_PATH, 'rb') as f:
                 supabase.storage.from_("sst-charts").upload(
                     path=storage_destination, file=f, file_options={"content-type": "image/png"}
                 )
 
-            # 2. Deactivate any previous records so clients only parse the fresh layer
+            # 2. Deactivate old rows
             supabase.table("sst_layers").update({"is_active": False}).eq("is_active", True).execute()
 
-            # 3. Insert complete data row to coordinate frontend dynamic scales
+            # 3. Write active telemetry stats for Legend Bar synchronization
             db_payload = {
                 "valid_time": datetime.datetime.utcnow().isoformat(),
                 "range_min": min_range,
@@ -137,11 +140,11 @@ def run_pipeline():
                 "is_active": True
             }
             supabase.table("sst_layers").insert(db_payload).execute()
-            print("🚀 Cloud Sync Finished! Map layers updated automatically.")
+            print("🚀 Cloud Sync Finished! Real-world ocean telemetry active inside Supabase.")
         except Exception as e:
             print(f"❌ Cloud Sync Failed: {e}")
     else:
-        print("💡 Pipeline paused safely: Supabase environment handles are offline.")
+        print("💡 Sync Paused: Supabase secure keys are not visible to system runtime handles.")
 
 if __name__ == "__main__":
     run_pipeline()
