@@ -18,7 +18,6 @@ MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 
 # 2. TARGET ACTIVE DATASET: NASA/JPL MUR SST (1km Resolution Grid)
-# Realignment: Swapped 'latest' out for the exact live integer index 8719 required by NOAA
 NOAA_MUR_URL = (
     "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst"
     f"[8719][({MIN_LAT}):({MAX_LAT})][({MIN_LNG}):({MAX_LNG})]"
@@ -51,8 +50,12 @@ def run_pipeline():
     print("⏳ Stage 2: Extracting telemetry matrix dimensions...")
     try:
         with xr.open_dataset(tmp_nc) as ds:
-            # Extract out the 2D spatial temperature matrix
-            sst_k = ds['analysed_sst'].values.squeeze()
+            # Extract raw short integers from variable array
+            raw_sst = ds['analysed_sst'].values.squeeze()
+            
+            # NASA/JPL Data Decompression: Apply scale factor (0.001) first 
+            # to uncompress short integers back to true Kelvin values
+            sst_k = raw_sst * 0.001
             
             # Convert Kelvin to Fahrenheit natively: (K - 273.15) * 1.8 + 32
             sst_f = (sst_k - 273.15) * 1.8 + 32
@@ -104,8 +107,8 @@ def run_pipeline():
     uint8_img_matrix = (rgba_image_data * 255).astype(np.uint8)
     img = Image.fromarray(uint8_img_matrix, mode="RGBA")
     
-    # Resize up cleanly using high-grade bicubic filtering for ultra-smooth rendering
-    img_smooth = img.resize((1024, 1024), resample=Image.Resample.BICUBIC)
+    # Updated to the new cross-platform Pillow Resampling attribute structure
+    img_smooth = img.resize((1024, 1024), resample=Image.BICUBIC)
     img_smooth.save(OUTPUT_IMG_PATH, "PNG", optimize=True)
     print("✅ Stage 4 Complete: Transparent raster tile built.")
 
