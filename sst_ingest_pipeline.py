@@ -18,11 +18,8 @@ MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 
 # 2. TOURNAMENT GOLD STANDARD ENDPOINT: JPL MUR SST (1km Resolution Grid)
-# Queries time array [latest], latitude slice, and longitude slice perfectly matching the grid orientation
-NOAA_MUR_URL = (
-    "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst"
-    f"[latest][({MIN_LAT}):({MAX_LAT})][({MIN_LNG}):({MAX_LNG})]"
-)
+# Formatted to query the unconstrained active grid layer cleanly to bypass server-side slicing errors
+NOAA_MUR_URL = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst[latest][:][:]"
 
 OUTPUT_IMG_PATH = "./daily_latest.png"
 
@@ -49,11 +46,21 @@ def run_pipeline():
         print(f"❌ Critical Error connecting to NOAA ERDDAP Stream: {e}")
         return
 
-    print("⏳ Stage 2: Slicing multidimensional structural dimensions...")
+    print("⏳ Stage 2: Slicing multidimensional structural dimensions locally...")
     try:
         with xr.open_dataset(tmp_nc) as ds:
+            # Dynamically look up the exact name of coordinate dimensions inside NASA's payload
+            lat_dim = 'latitude' if 'latitude' in ds.coords else 'lat'
+            lon_dim = 'longitude' if 'longitude' in ds.coords else 'lon'
+            
+            # Perform high-precision slicing right in our secure virtual machine memory environment
+            sliced_ds = ds.sel({
+                lat_dim: slice(MIN_LAT, MAX_LAT),
+                lon_dim: slice(MIN_LNG, MAX_LNG)
+            })
+            
             # Extract out the 2D spatial temperature matrix
-            sst_k = ds['analysed_sst'].values.squeeze()
+            sst_k = sliced_ds['analysed_sst'].values.squeeze()
             
             # Real-World Conversion Math:
             # NOAA stores MUR data in Kelvin. Convert to Fahrenheit: (K - 273.15) * 1.8 + 32
