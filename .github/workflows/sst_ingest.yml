@@ -17,7 +17,7 @@ jobs:
     - name: Set up Python Runtime Environment
       uses: actions/setup-python@v5
       with:
-        python-state: '3.10'
+        python-version: '3.10' # Fixes the unexpected input warning
 
     - name: Install High-Performance Marine Dependencies
       run: |
