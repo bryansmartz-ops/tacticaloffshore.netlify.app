@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-SST Ingestion Pipeline - High-Fidelity Spatial Grid Matrix Engine
-Generates dynamically scaled, tournament-grade thermal charts directly from NOAA.
+SST Ingestion Pipeline - Bulletproof Fail-Safe Regional Grid Matrix Engine
+Downloads a fixed regional satellite block and slices coordinates locally.
 """
 
 import os
@@ -18,11 +18,8 @@ MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 MATRIX_RES = 32
 
-# NOAA ERDDAP URL API - Formatted perfectly with Latitude, Longitude, and Time layers
-NOAA_ERDDAP_URL = (
-    "https://coastwatch.pfeg.noaa.gov/erddap/griddap/noaacwBLENDEDsstDaily.nc?"
-    f"sst[latest][({MAX_LAT}):({MIN_LAT})][({MIN_LNG}):({MAX_LNG})]"
-)
+# Master Regional Data Link - Broad grid to prevent 404 errors entirely
+NOAA_BULLETPROOF_URL = "https://coastwatch.pfeg.noaa.gov/erddap/griddap/noaacwBLENDEDsstDaily.nc?sst[latest][(25.0):(50.0)][(-85.0):(-65.0)]"
 
 OUTPUT_IMG_PATH = "./daily_latest.png"
 
@@ -31,25 +28,28 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def run_pipeline():
-    print("⏳ Stage 1: Connecting to NOAA CoastWatch...")
+    print("⏳ Stage 1: Downloading master North Atlantic data block from NOAA...")
     try:
-        response = requests.get(NOAA_ERDDAP_URL, stream=True, timeout=45)
+        response = requests.get(NOAA_BULLETPROOF_URL, stream=True, timeout=60)
         response.raise_for_status()
         
         tmp_nc = "tmp_satellite_grid.nc"
         with open(tmp_nc, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        print("✅ Stage 1 Complete: Satellite gridded block secured.")
+        print("✅ Stage 1 Complete: Master regional satellite block secured.")
     except Exception as e:
         print(f"❌ Failure downloading NOAA grid: {e}")
         return
 
-    print("⏳ Stage 2: Processing NetCDF satellite arrays...")
+    print("⏳ Stage 2: Slicing Mid-Atlantic coordinate window locally...")
     try:
         with xr.open_dataset(tmp_nc) as ds:
-            # Squeezing the dimensions down to pull out the 2D spatial grid array cleanly
-            sst_k = ds['sst'].values.squeeze()
+            # Slice out our exact canyon coordinate bounding box using native xarray logic
+            # Using the correct data dimension names: 'latitude' and 'longitude'
+            sliced_ds = ds.sel(latitude=slice(MAX_LAT, MIN_LAT), longitude=slice(MIN_LNG, MAX_LNG))
+            
+            sst_k = sliced_ds['sst'].values.squeeze()
             # Convert Kelvin to Fahrenheit natively: (K - 273.15) * 9/5 + 32
             sst_f = (sst_k - 273.15) * 1.8 + 32
             
@@ -59,51 +59,48 @@ def run_pipeline():
         # Isolate real marine temperatures by skipping over missing/cloud-masked values
         valid_temps = sst_f[~np.isnan(sst_f)]
         if len(valid_temps) == 0:
-            print("⚠️ Warning: Extreme cloud masking detected. Fallback array activated.")
-            valid_temps = np.array([68.0, 76.0])
+            print("⚠️ Warning: Heavy cloud cover detected. Triggering static matrix boundaries.")
+            valid_temps = np.array([65.0, 78.0])
             
-        print("✅ Stage 2 Complete: Array mapped successfully.")
+        print("✅ Stage 2 Complete: Mid-Atlantic coordinate window sliced safely.")
     except Exception as e:
-        print(f"❌ Failure parsing NetCDF structure: {e}")
+        print(f"❌ Failure parsing and slicing data matrices: {e}")
+        if os.path.exists(tmp_nc):
+            os.remove(tmp_nc)
         return
 
     print("⏳ Stage 3: Computing dynamic palette scaling boundaries...")
-    # Clean up edge noise by removing the extreme top and bottom 2% of raw telemetry values
     min_range = float(np.percentile(valid_temps, 2))
     max_range = float(np.percentile(valid_temps, 98))
     print(f"📈 Observed Matrix Boundaries: {min_range:.1f}°F to {max_range:.1f}°F")
 
     color_sequence = [
         "rgba(37, 99, 235, 0.55)", "rgba(22, 163, 74, 0.55)", "rgba(250, 204, 21, 0.55)",
-        "rgba(234, 88, 12, 0.55)", "rgba(22, 163, 74, 0.55)", "rgba(185, 28, 28, 0.65)"
+        "rgba(234, 88, 12, 0.55)", "rgba(220, 38, 38, 0.55)", "rgba(185, 28, 28, 0.65)"
     ]
     
     hex_colors = ["#2563eb", "#16a34a", "#facc15", "#ea580c", "#dc2626", "#b91c1c"]
     custom_cmap = LinearSegmentedColormap.from_list("sst_scale", hex_colors, N=256)
-    print("✅ Stage 3 Complete: Color map keys initialized.")
+    print("✅ Stage 3 Complete: Dynamic color keys locked.")
 
-    print("⏳ Stage 4: Rasterizing transparent map tile image...")
-    # Normalize our matrix surface data layout between 0.0 and 1.0 against the active bounds
+    print("⏳ Stage 4: Rasterizing high-fidelity transparent map overlay...")
     sst_f_normalized = (sst_f - min_range) / (max_range - min_range)
     sst_f_normalized = np.clip(sst_f_normalized, 0, 1)
     
-    # Render landmasses and heavy cloud blocks completely transparent (Alpha = 0)
     nan_mask = np.isnan(sst_f)
     rgba_image_data = custom_cmap(sst_f_normalized)
     rgba_image_data[nan_mask] = [0, 0, 0, 0]
     
-    # Map array indices directly into a production-grade PNG raster layer image block
     uint8_img_matrix = (rgba_image_data * 255).astype(np.uint8)
     img = Image.fromarray(uint8_img_matrix, mode="RGBA")
     
-    # Scale up using high-performance bicubic interpolation to soften raw grid edges perfectly
     img_smooth = img.resize((512, 512), resample=Image.Resample.BICUBIC)
     img_smooth.save(OUTPUT_IMG_PATH, "PNG", optimize=True)
-    print("✅ Stage 4 Complete: High-contrast raster overlay built.")
+    print("✅ Stage 4 Complete: High-contrast raster file built locally.")
 
     # Execute automated Supabase storage and data synchronization loops
     if SUPABASE_KEY and SUPABASE_URL:
-        print("⏳ Stage 5: Uploading assets directly to Supabase Storage and DB...")
+        print("⏳ Stage 5: Uploading assets directly to Supabase Cloud...")
         try:
             supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
             timestamp_slug = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
