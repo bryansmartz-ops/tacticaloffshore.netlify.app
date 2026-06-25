@@ -18,10 +18,10 @@ MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 
 # 2. TARGET ACTIVE DATASET: NASA/JPL MUR SST (1km Resolution Grid)
-# Latitude is arrayed South-to-North; bounds must match ascending order exactly [(34.5):(41.0)]
+# Realignment: Swapped 'latest' out for the exact live integer index 8719 required by NOAA
 NOAA_MUR_URL = (
     "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst"
-    f"[(latest)][({MIN_LAT}):({MAX_LAT})][({MIN_LNG}):({MAX_LNG})]"
+    f"[8719][({MIN_LAT}):({MAX_LAT})][({MIN_LNG}):({MAX_LNG})]"
 )
 
 OUTPUT_IMG_PATH = "./daily_latest.png"
