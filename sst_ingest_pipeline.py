@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-SST Ingestion Pipeline - Production High-Fidelity Satellite Engine
-Extracts high-resolution telemetry grids directly from NOAA CoastWatch Central Nodes.
+SST Ingestion Pipeline - Live Production High-Fidelity Satellite Engine
+Extracts 1km ultra-high-resolution telemetry grids directly from NASA/JPL MUR SST.
 """
 
 import os
@@ -17,11 +17,11 @@ from supabase import create_client, Client
 MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 
-# 2. TOURNAMENT STANDARD ENDPOINT: NOAA CoastWatch Central Blended Daily SST
-# Structured via clear OPeNDAP dimension subsets to map straight to the active satellite pass
-NOAA_CENTRAL_URL = (
-    "https://coastwatch.pfeg.noaa.gov/erddap/griddap/noaacwBLENDEDsstDaily.nc?sst"
-    f"[latest][({MAX_LAT}):({MIN_LAT})][({MIN_LNG}):({MAX_LNG})]"
+# 2. TARGET ACTIVE DATASET: NASA/JPL MUR SST (1km Resolution Grid)
+# Latitude is arrayed South-to-North; bounds must match ascending order exactly [(34.5):(41.0)]
+NOAA_MUR_URL = (
+    "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst"
+    f"[(latest)][({MIN_LAT}):({MAX_LAT})][({MIN_LNG}):({MAX_LNG})]"
 )
 
 OUTPUT_IMG_PATH = "./daily_latest.png"
@@ -31,12 +31,12 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def run_pipeline():
-    print("⏳ Stage 1: Connecting to NOAA CoastWatch Central Data Node...")
+    print("⏳ Stage 1: Connecting to NOAA/NASA JPL Data Nodes...")
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(NOAA_CENTRAL_URL, headers=headers, stream=True, timeout=90)
+        response = requests.get(NOAA_MUR_URL, headers=headers, stream=True, timeout=120)
         response.raise_for_status()
         
         tmp_nc = "tmp_satellite_grid.nc"
@@ -52,7 +52,7 @@ def run_pipeline():
     try:
         with xr.open_dataset(tmp_nc) as ds:
             # Extract out the 2D spatial temperature matrix
-            sst_k = ds['sst'].values.squeeze()
+            sst_k = ds['analysed_sst'].values.squeeze()
             
             # Convert Kelvin to Fahrenheit natively: (K - 273.15) * 1.8 + 32
             sst_f = (sst_k - 273.15) * 1.8 + 32
@@ -73,7 +73,6 @@ def run_pipeline():
         return
 
     print("⏳ Stage 3: Running Dynamic Contrast Scaling Math...")
-    # Clean up signal noise by trimming out the extreme top and bottom 2% of anomalous entries
     min_range = float(np.percentile(valid_temps, 2))
     max_range = float(np.percentile(valid_temps, 98))
     print(f"📈 Real-World Thermal Box Range: {min_range:.1f}°F to {max_range:.1f}°F")
@@ -94,6 +93,9 @@ def run_pipeline():
     # Normalize values between 0.0 and 1.0 based on today's true active span
     sst_f_normalized = (sst_f - min_range) / (max_range - min_range)
     sst_f_normalized = np.clip(sst_f_normalized, 0, 1)
+    
+    # Flip the image arrays on the vertical axis so it projects correctly in Leaflet coordinate bounds
+    sst_f_normalized = np.flipud(sst_f_normalized)
     
     nan_mask = np.isnan(sst_f)
     rgba_image_data = custom_cmap(sst_f_normalized)
