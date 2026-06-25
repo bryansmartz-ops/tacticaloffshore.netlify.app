@@ -17,10 +17,13 @@ from supabase import create_client, Client
 MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 
-# 2. TARGET ACTIVE DATASET: NASA/JPL MUR SST (1km Resolution Grid)
+# 2. COMPUTE DYNAMIC UTC DATA WINDOW TARGETS
+# Generates a clean ISO-8601 string structure to clear the WAF 403 block natively
+target_date = (datetime.datetime.utcnow() - datetime.timedelta(days=1)).strftime("%Y-%m-%dT09:00:00Z")
+
 NOAA_MUR_URL = (
     "https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41.nc?analysed_sst"
-    f"[8719][({MIN_LAT}):({MAX_LAT})][({MIN_LNG}):({MAX_LNG})]"
+    f"[({target_date})][({MIN_LAT}):({MAX_LAT})][({MIN_LNG}):({MAX_LNG})]"
 )
 
 OUTPUT_IMG_PATH = "./daily_latest.png"
@@ -30,7 +33,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def run_pipeline():
-    print("⏳ Stage 1: Connecting to NOAA/NASA JPL Data Nodes...")
+    print(f"⏳ Stage 1: Handshaking with NOAA Central System using target context window: {target_date}...")
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
