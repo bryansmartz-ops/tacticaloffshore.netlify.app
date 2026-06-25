@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-SST Ingestion Pipeline - North Atlantic Regional Satellite Engine
-Extracts high-resolution regional telemetry grids directly from NOAA CoastWatch East Coast Nodes.
+SST Ingestion Pipeline - Production High-Fidelity Satellite Engine
+Extracts high-resolution telemetry grids directly from NOAA CoastWatch Central Nodes.
 """
 
 import os
@@ -17,10 +17,10 @@ from supabase import create_client, Client
 MIN_LAT, MAX_LAT = 34.5, 41.0
 MIN_LNG, MAX_LNG = -76.5, -70.0
 
-# 2. REGIONAL ENDPOINT: NOAA CoastWatch East Coast 3-Day Blended SST
-# Pre-filtered to the Atlantic region so it won't trigger server-side size limits
-NOAA_REGIONAL_URL = (
-    "https://coastwatch.node.noaa.gov/erddap/griddap/noaacwSSTAtlanticDaily.nc?sst"
+# 2. TOURNAMENT STANDARD ENDPOINT: NOAA CoastWatch Central Blended Daily SST
+# Structured via clear OPeNDAP dimension subsets to map straight to the active satellite pass
+NOAA_CENTRAL_URL = (
+    "https://coastwatch.pfeg.noaa.gov/erddap/griddap/noaacwBLENDEDsstDaily.nc?sst"
     f"[latest][({MAX_LAT}):({MIN_LAT})][({MIN_LNG}):({MAX_LNG})]"
 )
 
@@ -31,21 +31,21 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 def run_pipeline():
-    print("⏳ Stage 1: Connecting to NOAA CoastWatch East Coast Regional Data Node...")
+    print("⏳ Stage 1: Connecting to NOAA CoastWatch Central Data Node...")
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        response = requests.get(NOAA_REGIONAL_URL, headers=headers, stream=True, timeout=90)
+        response = requests.get(NOAA_CENTRAL_URL, headers=headers, stream=True, timeout=90)
         response.raise_for_status()
         
         tmp_nc = "tmp_satellite_grid.nc"
         with open(tmp_nc, "wb") as f:
             for chunk in response.iter_content(chunk_size=16384):
                 f.write(chunk)
-        print("✅ Stage 1 Complete: Regional NetCDF satellite package secured.")
+        print("✅ Stage 1 Complete: Central NetCDF satellite package secured.")
     except Exception as e:
-        print(f"❌ Critical Error connecting to NOAA Regional Stream: {e}")
+        print(f"❌ Critical Error connecting to NOAA Central Stream: {e}")
         return
 
     print("⏳ Stage 2: Extracting telemetry matrix dimensions...")
